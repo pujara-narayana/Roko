@@ -14,6 +14,7 @@ next-env.d.ts
 
 # runtime artifacts (generated per run)
 /data/
+/public/generated/
 
 # debug
 npm-debug.log*
