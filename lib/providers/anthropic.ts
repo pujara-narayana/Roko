@@ -42,6 +42,10 @@ async function callMessages(content: MessageContent, opts: CompleteOpts = {}): P
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 25_000);
 
+  const model = opts.model ?? DEFAULT_MODEL;
+  // 4.6+ adaptive models deprecate `temperature`; everything older still takes it.
+  const supportsTemperature = !/(opus-4-[6-9]|sonnet-4-6|fable-5|mythos-5)/.test(model);
+
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
@@ -52,9 +56,12 @@ async function callMessages(content: MessageContent, opts: CompleteOpts = {}): P
         'anthropic-version': API_VERSION,
       },
       body: JSON.stringify({
-        model: opts.model ?? DEFAULT_MODEL,
+        model,
         max_tokens: opts.maxTokens ?? 1024,
-        temperature: opts.temperature ?? 0.4,
+        // `temperature` is deprecated (and rejected with a 400) on the 4.6+
+        // adaptive-thinking models — Opus 4.6/4.7/4.8, Sonnet 4.6, Fable/Mythos 5.
+        // Only send it for older models that still accept it.
+        ...(supportsTemperature ? { temperature: opts.temperature ?? 0.4 } : {}),
         ...(opts.system ? { system: opts.system } : {}),
         messages: [{ role: 'user', content }],
       }),

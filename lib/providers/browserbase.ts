@@ -12,7 +12,7 @@
  * sessions).
  */
 
-import { chromium } from 'playwright-core';
+import type { Browser } from 'playwright-core';
 import Browserbase from '@browserbasehq/sdk';
 
 const API_BASE = 'https://api.browserbase.com/v1';
@@ -138,8 +138,14 @@ export async function retrieveCompanies(
     return null;
   }
 
-  let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
+  let browser: Browser | null = null;
   try {
+    // Lazy-load playwright-core only when a live session actually runs. A
+    // top-level import would pull this heavy package (and its browsers.json
+    // asset) into every serverless route that touches the provider registry,
+    // crashing routes like /api/agents on Vercel. Loading it here also means a
+    // missing/untraced module degrades to the seeded fallback instead of a 500.
+    const { chromium } = await import('playwright-core');
     browser = await chromium.connectOverCDP(session.connectUrl);
     const context = browser.contexts()[0] ?? (await browser.newContext());
 
