@@ -24,6 +24,8 @@ export type AgentStatus = 'queued' | 'working' | 'submitted' | 'failed' | 'await
 
 export interface AgentCardState {
   agentId: string;
+  name?: string;               // display name (user agents aren't in the static roster)
+  emoji?: string;              // display emoji
   status: AgentStatus;
   logLines: string[];          // most-recent-last, capped
   progressStep: number;
@@ -176,6 +178,8 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
             ...state.agents,
             [agentId]: {
               ...card,
+              name: (p.agentName as string) ?? card.name,
+              emoji: (p.agentEmoji as string) ?? card.emoji,
               status: isAwaiting ? 'awaiting' : 'working',
               awaitingKey: isAwaiting ? (p.awaitingKey as string) : card.awaitingKey,
               deliverableTitle: (p.deliverableTitle as string) ?? card.deliverableTitle,
@@ -197,6 +201,8 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
             ...state.agents,
             [agentId]: {
               ...card,
+              name: (p.agentName as string) ?? card.name,
+              emoji: (p.agentEmoji as string) ?? card.emoji,
               status: 'submitted',
               recordCount: p.recordCount as number | undefined,
               source: p.source as string | undefined,
@@ -323,7 +329,7 @@ export interface UseRunStreamResult extends PipelineState {
   error?: string;
 }
 
-export function useRunStream(bountyId: string): UseRunStreamResult {
+export function useRunStream(bountyId: string, injectAgentId?: string): UseRunStreamResult {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const startedRef = useRef(false);
   const esRef = useRef<EventSource | null>(null);
@@ -409,7 +415,7 @@ export function useRunStream(bountyId: string): UseRunStreamResult {
     if (startedRef.current) return;
     startedRef.current = true;
     dispatch({ type: 'connection', value: 'connecting' });
-    api_startRun(bountyId)
+    api_startRun(bountyId, injectAgentId)
       .then(({ runId, streamUrl }) => {
         dispatch({ type: 'runStarted', runId });
         if (typeof window !== 'undefined' && 'EventSource' in window) {
@@ -422,7 +428,7 @@ export function useRunStream(bountyId: string): UseRunStreamResult {
         errorRef.current = err?.message ?? 'Failed to start run';
         dispatch({ type: 'connection', value: 'error' });
       });
-  }, [bountyId, connectSSE, startPolling]);
+  }, [bountyId, injectAgentId, connectSSE, startPolling]);
 
   useEffect(() => cleanup, [cleanup]);
 
@@ -430,11 +436,11 @@ export function useRunStream(bountyId: string): UseRunStreamResult {
 }
 
 // Local thin wrapper so the hook has no import cycle concerns.
-async function api_startRun(bountyId: string): Promise<{ runId: string; streamUrl: string }> {
+async function api_startRun(bountyId: string, injectAgentId?: string): Promise<{ runId: string; streamUrl: string }> {
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bountyId }),
+    body: JSON.stringify({ bountyId, injectAgentId }),
   });
   const body = await res.json();
   if (!body.ok) throw new Error(body.error || 'Failed to start run');

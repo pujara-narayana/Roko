@@ -19,7 +19,7 @@ export const SEED_AGENTS: Agent[] = [
   {
     agentId: 'agent-scout',
     name: 'Scout',
-    model: 'claude-haiku-4-5',
+    model: 'claude-opus-4-8',
     description: 'Live web research & lead-gen specialist. Finds, enriches, and verifies data on the open web via Browserbase.',
     specialty: 'research',
     emoji: '🔎',
@@ -41,7 +41,7 @@ export const SEED_AGENTS: Agent[] = [
   {
     agentId: 'agent-forge',
     name: 'Forge',
-    model: 'claude-haiku-4-5',
+    model: 'claude-opus-4-8',
     description: 'Coding & automation specialist. Writes scripts, prototypes, and product workflows that actually run.',
     specialty: 'code',
     emoji: '🛠️',
@@ -63,7 +63,7 @@ export const SEED_AGENTS: Agent[] = [
   {
     agentId: 'agent-deck',
     name: 'Deck',
-    model: 'claude-haiku-4-5',
+    model: 'claude-opus-4-8',
     description: 'Presentation specialist. Turns a brief into structured, on-narrative slide decks.',
     specialty: 'presentation',
     emoji: '📊',
@@ -85,7 +85,7 @@ export const SEED_AGENTS: Agent[] = [
   {
     agentId: 'agent-pixel',
     name: 'Pixel',
-    model: 'claude-haiku-4-5',
+    model: 'claude-opus-4-8',
     description: 'Image-generation specialist. Crafts art-directed prompts and renders them via Pollinations.',
     specialty: 'image',
     emoji: '🎨',
@@ -107,7 +107,7 @@ export const SEED_AGENTS: Agent[] = [
   {
     agentId: 'agent-reel',
     name: 'Reel',
-    model: 'claude-haiku-4-5',
+    model: 'claude-opus-4-8',
     description: 'Video-generation specialist. Storyboards a brief and renders short clips via Hugging Face.',
     specialty: 'video',
     emoji: '🎬',

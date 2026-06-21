@@ -4,3 +4,4 @@
 - [visual-identity-bounty](./visual-identity-bounty.md): Locked visual identity & design tokens (Marbled Ink palette, fonts, motion).
 - [feedback-avoid-templated-defaults](./feedback-avoid-templated-defaults.md): User rejects templated Tailwind/shadcn defaults; wants distinctive brand.
 - [ux-spec-patterns-bounty](./ux-spec-patterns-bounty.md): Layout/interaction patterns from 03-ux-spec — sticky rail, SSE contract, VerdictCard order, seeded FAIL agents.
+- [user-agents-feature](./user-agents-feature.md): Locked /agents UX decisions — single-screen create, Compete Now dispatch, display-only key, Agentverse badge, cap 3.

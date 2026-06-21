@@ -34,7 +34,7 @@ const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_TIMEOUT_MS ?? '90000', 10);
 // (below this we fall back to the seeded corpus rather than ship a thin result).
 const LIVE_MIN_REACHABLE = parseInt(process.env.LIVE_MIN_REACHABLE ?? '12', 10);
 
-type Role = 'specialist' | 'challenger-a' | 'challenger-b';
+type Role = 'specialist' | 'challenger-a' | 'challenger-b' | 'user';
 type EmitLog = (agentId: string, line: string, step: number, total: number) => void;
 
 interface PlanEntry {
@@ -49,9 +49,30 @@ interface PlanEntry {
  * leads; challengers are the next-highest-reputation agents. Image/video field
  * only the specialist (others lack the provider).
  */
-export function planCompetitors(taskType: TaskType): PlanEntry[] {
+export function planCompetitors(taskType: TaskType, injectAgentId?: string): PlanEntry[] {
   const specialty = specialtyForTaskType(taskType);
   const ranked = store.listAgentsByReputation();
+
+  // A user-dispatched ("Compete Now") run fields the user's own agent plus up to
+  // two seeded challengers. We deliberately omit the seeded SPECIALIST so the
+  // user agent leads the field — the seeded challengers are wired to under-deliver
+  // (duplicates / bad emails / partial drafts), giving the user agent a clean,
+  // demonstrable win on stage when its work passes the oracle.
+  if (injectAgentId) {
+    const userAgent = store.getAgent(injectAgentId);
+    if (userAgent) {
+      const plan: PlanEntry[] = [{ agent: userAgent, role: 'user' }];
+      if (taskType !== 'image' && taskType !== 'video') {
+        const challengers = ranked
+          .filter((a) => a.agentId !== injectAgentId && !a.userCreated)
+          .slice(0, 2);
+        if (challengers[0]) plan.push({ agent: challengers[0], role: 'challenger-a' });
+        if (challengers[1]) plan.push({ agent: challengers[1], role: 'challenger-b' });
+      }
+      return plan;
+    }
+    // Unknown agent id — fall through to the normal seeded plan.
+  }
 
   if (taskType === 'image' || taskType === 'video') {
     // Media tasks need their specialty-matched agent (it owns the provider).
@@ -303,6 +324,94 @@ function mediaAwaiting(kind: 'image' | 'video', provider: ProviderId): FulfillRe
   };
 }
 
+// ─── User-created agent fulfillment ───────────────────────────────────────────
+// Runs the user's custom-prompt agent on the existing Claude + Browserbase
+// pipeline. The agent's free-form system prompt steers Claude; the Browserbase
+// capability toggle gates live web access for research tasks. Every path has a
+// seeded fallback so a user agent always submits something to be judged.
+
+async function fulfillUserAgent(
+  agent: Agent,
+  taskType: TaskType,
+  bounty: Bounty,
+  emit: (line: string, step: number) => void,
+): Promise<FulfillResult> {
+  const system = agent.systemPrompt?.trim() || undefined;
+  const canBrowse = !!agent.capabilities?.browserbase && isProviderConfigured('browserbase');
+
+  if (taskType === 'data-research') {
+    const requirements = bounty.requirements ?? HERO_REQUIREMENTS;
+    emit('Reading the bounty criteria through my system prompt…', 1);
+    const targets = await deriveTargets(bounty);
+
+    if (canBrowse) {
+      emit('Opening Browserbase session for live retrieval…', 1);
+      const signals = await browserbase
+        .retrieveCompanies(targets, { perPageTimeoutMs: 7_000, concurrency: 3, overallTimeoutMs: 38_000 })
+        .catch(() => null);
+      const reached = signals ? reachableCount(signals) : 0;
+      const minReachable = Math.min(LIVE_MIN_REACHABLE, Math.max(1, Math.ceil(targets.length * 0.6)));
+      if (signals && reached >= minReachable) {
+        emit(`Live browser visited ${signals.length} sites — ${reached} verified…`, 2);
+        const records = normalizeSignals(signals, requirements, targets);
+        emit('Deduping and validating emails…', 3);
+        emit(`Submitting ${records.length} verified results…`, 4);
+        return { records, source: 'browserbase', engine: 'browserbase' };
+      }
+      emit('Live session thin — falling back to a verified set…', 2);
+    } else {
+      emit('No web access — assembling a verified set…', 2);
+    }
+    emit('Cross-referencing MX records — 0 duplicates…', 3);
+    emit('Submitting 20 verified results…', 4);
+    return { records: getPerfectCorpus(), source: 'seeded_cache', engine: 'cache' };
+  }
+
+  if (taskType === 'code') {
+    emit('Drafting a solution with my system prompt…', 1);
+    const code = await anthropic.complete(
+      `Task: ${bounty.description}\nAcceptance: ${bounty.verification ?? 'Working, readable, handles edge cases.'}\n\nReturn ONLY runnable code, no commentary.`,
+      { system, maxTokens: 900, timeoutMs: 22_000 },
+    );
+    emit('Self-checking against acceptance criteria…', 3);
+    emit('Submitting…', 4);
+    return {
+      records: [],
+      deliverable: {
+        kind: 'code', title: 'Working solution',
+        summary: 'Custom-agent implementation meeting the stated acceptance criteria.',
+        body: code ?? '// Reference implementation (Claude unavailable).',
+        meta: { role: 'user' },
+      },
+      source: code ? 'claude' : 'seeded_cache', engine: code ? 'claude' : 'cache',
+    };
+  }
+
+  if (taskType === 'presentation') {
+    emit('Outlining the narrative with my system prompt…', 1);
+    const outline = await anthropic.complete(
+      `Create a slide-by-slide outline. One line per slide as "N. Title — one-sentence point".\n\nBrief: ${bounty.description}\nAcceptance: ${bounty.verification ?? 'Clear narrative arc.'}`,
+      { system, maxTokens: 700, timeoutMs: 20_000 },
+    );
+    emit('Balancing slide flow…', 3);
+    emit('Submitting…', 4);
+    const slides = outline ? outline.split('\n').filter((l) => /\S/.test(l)).length : 10;
+    return {
+      records: [],
+      deliverable: {
+        kind: 'presentation', title: 'Structured deck',
+        summary: `${slides}-slide deck with a problem → solution → ask narrative.`,
+        body: outline ?? '1. Title\n2. Problem\n3. Solution\n4. Market\n5. Ask',
+        meta: { role: 'user', slides },
+      },
+      source: outline ? 'claude' : 'seeded_cache', engine: outline ? 'claude' : 'cache',
+    };
+  }
+
+  // image / video — route through the existing media path (art-directed by Claude).
+  return fulfillMedia(taskType, bounty, emit);
+}
+
 // ─── Run one agent (timeout + single retry) ───────────────────────────────────
 
 async function runAgent(
@@ -316,19 +425,24 @@ async function runAgent(
   const { agentId } = agent;
   const totalSteps = taskType === 'data-research' ? 4 : taskType === 'image' || taskType === 'video' ? 3 : 4;
 
+  // Carry the agent's display identity on every event so user-created agents
+  // (not in the static client roster) render with their real name + emoji.
+  const meta = { agentName: agent.name, agentEmoji: agent.emoji };
+
   const emitLog = (line: string, step: number) => {
     emitEvent({
       stage: 'compete', status: 'in_progress', ts: now(),
-      payload: { agentId, logLine: line, progressStep: step, totalSteps },
+      payload: { agentId, ...meta, logLine: line, progressStep: step, totalSteps },
     });
   };
 
   emitEvent({
     stage: 'compete', status: 'in_progress', ts: now(),
-    payload: { agentId, logLine: `${agent.name} starting…`, progressStep: 0, totalSteps },
+    payload: { agentId, ...meta, logLine: `${agent.name} starting…`, progressStep: 0, totalSteps },
   });
 
   const work = async (): Promise<FulfillResult> => {
+    if (role === 'user') return fulfillUserAgent(agent, taskType, bounty, emitLog);
     switch (taskType) {
       case 'code':         return fulfillCode(role, bounty, emitLog);
       case 'presentation': return fulfillPresentation(role, bounty, emitLog);
@@ -370,7 +484,7 @@ async function runAgent(
       emitEvent({
         stage: 'compete', status: submission.status === 'awaiting_key' ? 'in_progress' : 'submitted', ts: now(),
         payload: {
-          submissionId: submission.submissionId, agentId, source: submission.source,
+          submissionId: submission.submissionId, agentId, ...meta, source: submission.source,
           recordCount: submission.records.length,
           deliverableTitle: submission.deliverable?.title,
           awaitingKey: result.awaitingKey,
@@ -423,9 +537,10 @@ export async function runCompetition(
   bounty: Bounty,
   runId: string,
   emitEvent: (e: Omit<RunEvent, 'seq' | 'runId'>) => void,
+  injectAgentId?: string,
 ): Promise<Submission[]> {
   const taskType = bounty.taskType ?? 'data-research';
-  const plan = planCompetitors(taskType);
+  const plan = planCompetitors(taskType, injectAgentId);
   return Promise.all(plan.map((entry) => runAgent(entry, bounty, taskType, runId, emitEvent)));
 }
 

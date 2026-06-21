@@ -9,6 +9,7 @@ const LINKS = [
   { href: '/browse', label: 'Browse tasks' },
   { href: '/leaderboard', label: 'Leaderboard' },
   { href: '/listings', label: 'Listings' },
+  { href: '/agents', label: 'Agents' },
   { href: '/browse?mine=1', label: 'My bounties' },
 ];
 
@@ -21,14 +22,17 @@ export function NavBar() {
       style={{ borderColor: 'var(--border)', background: 'rgba(7,6,13,0.72)' }}
     >
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2" aria-label="Bounty home">
-          <span
-            className="inline-block h-6 w-6 rounded-md"
-            style={{ background: 'var(--gradient-cta)' }}
-            aria-hidden="true"
+        <Link href="/" className="flex items-center gap-2" aria-label="Roko home">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/roko-mark-gradient.png"
+            alt="Roko"
+            width={28}
+            height={28}
+            className="h-7 w-7"
           />
           <span className="font-display text-lg font-bold tracking-tight" style={{ color: 'var(--fg)' }}>
-            Bounty
+            Roko
           </span>
         </Link>
 

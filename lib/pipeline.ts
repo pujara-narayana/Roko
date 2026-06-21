@@ -36,7 +36,7 @@ export function createRun(bounty: Bounty): Run {
 
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
-export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
+export async function executePipeline(run: Run, bounty: Bounty, injectAgentId?: string): Promise<void> {
   const { runId, bountyId } = run;
   const emit = createEmitter(runId);
   let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -108,7 +108,7 @@ export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
     store.setBounty(updatedBounty);
 
     // ── COMPETE stage ───────────────────────────────────────────────────────
-    const plan = planCompetitors(bounty.taskType ?? 'data-research');
+    const plan = planCompetitors(bounty.taskType ?? 'data-research', injectAgentId);
     emit({
       stage: 'compete',
       status: 'in_progress',
@@ -124,7 +124,7 @@ export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
 
     const submissions = await runCompetition(bounty, runId, (e) => {
       emit(e as Parameters<typeof emit>[0]);
-    });
+    }, injectAgentId);
 
     stopHeartbeat();
 

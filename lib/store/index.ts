@@ -39,6 +39,10 @@ class SortedSet<T extends { score: number; value: string }> {
     return this.items.get(value);
   }
 
+  zrem(value: string) {
+    this.items.delete(value);
+  }
+
   zrank(value: string): number {
     const sorted = this.zrevrange();
     const idx = sorted.indexOf(value);
@@ -97,6 +101,24 @@ class InMemoryStore {
       .zrevrange()
       .map(id => this.agents.get(id))
       .filter((a): a is Agent => !!a);
+  }
+
+  /** All agents (insertion order). */
+  listAgents(): Agent[] {
+    return [...this.agents.values()];
+  }
+
+  /** User-created agents only, newest first. */
+  listUserAgents(): Agent[] {
+    return [...this.agents.values()]
+      .filter(a => a.userCreated)
+      .sort((a, b) => (b.lastActive ?? '').localeCompare(a.lastActive ?? ''));
+  }
+
+  deleteAgent(id: string): boolean {
+    const existed = this.agents.delete(id);
+    this.leaderboard.zrem(id);
+    return existed;
   }
 
   incrementReputation(agentId: string, by: number) {

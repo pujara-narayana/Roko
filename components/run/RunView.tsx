@@ -22,13 +22,17 @@ const STAGE_HEADERS: Record<string, { label: string; desc: string; duration: str
 };
 
 export function RunView({
-  bounty, requirements, escrow,
+  bounty, requirements, escrow, injectAgentId,
 }: {
   bounty: Bounty;
   requirements: AcceptanceRequirements;
   escrow?: Escrow | null;
+  injectAgentId?: string;
 }) {
-  const run = useRunStream(bounty.bountyId);
+  const run = useRunStream(bounty.bountyId, injectAgentId);
+  // Prefer the live display name streamed for an agent (user agents aren't in
+  // the static roster) and fall back to the static lookup.
+  const displayName = (id: string) => run.agents[id]?.name ?? agentName(id);
   const [autoStarted, setAutoStarted] = useState(false);
   const [keyModalOpen, setKeyModalOpen] = useState(false);
   const [keyModalDismissed, setKeyModalDismissed] = useState(false);
@@ -64,7 +68,7 @@ export function RunView({
     : run.escrowFunded || escrow ? 'Funded' : 'Pending';
   const escrowStatusColor = escrowStatusLabel.startsWith('Settled') ? 'var(--paint-cyan)' : 'var(--paint-orange)';
 
-  const winnerName = run.settlement?.winnerAgentId ? agentName(run.settlement.winnerAgentId) : undefined;
+  const winnerName = run.settlement?.winnerAgentId ? displayName(run.settlement.winnerAgentId) : undefined;
   const released = run.settlement?.action === 'release' && !!run.settlement.transactionId;
 
   return (
@@ -163,7 +167,7 @@ export function RunView({
               <SectionLabel>Competing agents</SectionLabel>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {run.agentOrder.map((id, i) => (
-                  <AgentCard key={id} agent={run.agents[id]} name={agentName(id)} index={i} />
+                  <AgentCard key={id} agent={run.agents[id]} name={displayName(id)} index={i} />
                 ))}
               </div>
             </section>
@@ -179,7 +183,7 @@ export function RunView({
               >
                 <span className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--paint-magenta)' }} aria-hidden="true" />
                 {run.oracleRunning && !run.complete
-                  ? (run.oracleChecking ? `Verification Oracle — checking ${agentName(run.oracleChecking)}…` : 'Verification Oracle — running')
+                  ? (run.oracleChecking ? `Verification Oracle — checking ${displayName(run.oracleChecking)}…` : 'Verification Oracle — running')
                   : 'Verification Oracle — complete'}
               </div>
               <div className="space-y-4">
@@ -187,7 +191,7 @@ export function RunView({
                   <VerdictCard
                     key={id}
                     verdict={run.verdicts[id]}
-                    agentName={agentName(id)}
+                    agentName={displayName(id)}
                     index={i}
                     escrowReleased={released && run.settlement?.winnerAgentId === id ? { amountUsd: amount } : null}
                   />

@@ -38,7 +38,7 @@ export function AgentCard({
           style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
           aria-hidden="true"
         >
-          {agentEmoji(agent.agentId)}
+          {agent.emoji ?? agentEmoji(agent.agentId)}
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold" style={{ color: 'var(--fg)' }}>{name}</p>

@@ -4,9 +4,16 @@
 // ─────────────────────────────────────────────
 
 import type {
-  ApiResponse, Bounty, Escrow, OracleBatchResult,
+  ApiResponse, Agent, Bounty, Escrow, OracleBatchResult,
   PlatformStats, Run, ProviderStatus, TaskType,
 } from '@/lib/types';
+
+export interface CreateAgentInput {
+  name: string;
+  systemPrompt: string;
+  emoji?: string;
+  browserbase?: boolean;
+}
 
 export interface CreateBountyInput {
   title?: string;
@@ -84,10 +91,28 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  startRun: (bountyId: string) =>
+  startRun: (bountyId: string, injectAgentId?: string) =>
     getJSON<{ runId: string; streamUrl: string }>('/api/runs', {
       method: 'POST',
-      body: JSON.stringify({ bountyId }),
+      body: JSON.stringify({ bountyId, injectAgentId }),
     }),
   getRun: (runId: string) => getJSON<Run>(`/api/runs/${runId}`),
+
+  // ── User-created agents ──
+  getAgents: () => getJSON<Agent[]>('/api/agents'),
+  getAgent: (id: string) => getJSON<Agent & { rank: number }>(`/api/agents/${id}`),
+  createAgent: (input: CreateAgentInput) =>
+    getJSON<Agent>('/api/agents', { method: 'POST', body: JSON.stringify(input) }),
+  deleteAgent: (id: string) =>
+    getJSON<{ deleted: string }>(`/api/agents/${id}`, { method: 'DELETE' }),
+  addSubscription: (id: string, sub: { template: string; minPayout: number; maxPayout: number }) =>
+    getJSON<Agent>(`/api/agents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'addSubscription', ...sub }),
+    }),
+  removeSubscription: (id: string, subscriptionId: string) =>
+    getJSON<Agent>(`/api/agents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'removeSubscription', subscriptionId }),
+    }),
 };

@@ -22,8 +22,14 @@ async function fetchDetail(id: string): Promise<BountyDetail | null> {
   }
 }
 
-export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function RunPage({
+  params, searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ agent?: string }>;
+}) {
   const { id } = await params;
+  const { agent } = await searchParams;
   const detail = await fetchDetail(id);
   if (!detail) notFound();
 
@@ -33,7 +39,12 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   return (
     <>
       <NavBar />
-      <RunView bounty={detail.bounty} requirements={requirements} escrow={detail.escrow} />
+      <RunView
+        bounty={detail.bounty}
+        requirements={requirements}
+        escrow={detail.escrow}
+        injectAgentId={agent}
+      />
     </>
   );
 }

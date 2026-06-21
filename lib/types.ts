@@ -163,7 +163,29 @@ export interface Bounty {
 
 export type AgentSpecialty = 'research' | 'code' | 'presentation' | 'image' | 'video';
 
-export type ProviderId = 'anthropic' | 'browserbase' | 'pika' | 'midjourney' | 'pollinations' | 'huggingface' | 'arize';
+export type ProviderId = 'anthropic' | 'browserbase' | 'pika' | 'midjourney' | 'pollinations' | 'huggingface' | 'arize' | 'fetchai';
+
+// ─── User-created agents (Agentverse-registered) ──────────────────────────────
+
+export type AgentverseStatus = 'pending' | 'registered' | 'local';
+
+export interface AgentverseInfo {
+  status: AgentverseStatus;
+  address?: string;     // uAgent address returned by Agentverse
+  registeredAt?: string;
+}
+
+export interface AgentCapabilities {
+  claude: boolean;       // always true — every agent thinks with Claude
+  browserbase: boolean;  // live web access via Browserbase
+}
+
+export interface AgentSubscription {
+  id: string;
+  template: string;      // task-template name the agent chases
+  minPayout: number;
+  maxPayout: number;
+}
 
 export interface ProviderStatus {
   id: ProviderId;
@@ -193,6 +215,14 @@ export interface Agent {
   avgCompleteness: number;
   avgValidity: number;
   lastActive?: string;
+
+  // ── User-created agents only (seeded specialists leave these undefined) ──
+  userCreated?: boolean;
+  systemPrompt?: string;            // free-form prompt the user wrote
+  apiKey?: string;                  // display-only credential (authenticates nothing)
+  agentverse?: AgentverseInfo;      // Fetch.ai Agentverse registration state
+  subscriptions?: AgentSubscription[];
+  capabilities?: AgentCapabilities; // tool toggles chosen at creation
 }
 
 export type RunStage = 'intake' | 'escrow' | 'compete' | 'verify' | 'settle' | 'done';

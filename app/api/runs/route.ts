@@ -14,7 +14,8 @@ seedStore();
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { bountyId = HERO_BOUNTY_ID } = body as Record<string, unknown>;
+    const { bountyId = HERO_BOUNTY_ID, injectAgentId } = body as Record<string, unknown>;
+    const inject = typeof injectAgentId === 'string' ? injectAgentId : undefined;
 
     const bounty = store.getBounty(String(bountyId));
     if (!bounty) {
@@ -24,21 +25,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if a run is already active for this bounty (idempotency)
-    const existingRun = [...store.runs.values()].find(
-      r => r.bountyId === String(bountyId) && r.status === 'running'
-    );
-    if (existingRun) {
-      return NextResponse.json({
-        ok: true,
-        data: { runId: existingRun.runId, streamUrl: existingRun.streamUrl },
-      });
+    // Check if a run is already active for this bounty (idempotency). A user
+    // dispatch ("Compete Now") always starts a fresh run so the chosen agent
+    // is actually injected rather than re-attaching to a seeded run.
+    if (!inject) {
+      const existingRun = [...store.runs.values()].find(
+        r => r.bountyId === String(bountyId) && r.status === 'running'
+      );
+      if (existingRun) {
+        return NextResponse.json({
+          ok: true,
+          data: { runId: existingRun.runId, streamUrl: existingRun.streamUrl },
+        });
+      }
     }
 
     const run = createRun(bounty);
 
     // Fire-and-forget pipeline (runs in background)
-    executePipeline(run, bounty).catch(err => {
+    executePipeline(run, bounty, inject).catch(err => {
       console.error('[runs] Pipeline error:', err);
     });
 
