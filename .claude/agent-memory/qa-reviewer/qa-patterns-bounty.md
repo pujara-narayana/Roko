@@ -1,6 +1,6 @@
 ---
 name: qa-patterns-bounty
-description: Recurring bug patterns and QA learnings from the Bounty marketplace review
+description: Recurring bug patterns and QA learnings from the Bounty marketplace review (store + Redis layer)
 metadata:
   type: feedback
 ---
@@ -57,3 +57,33 @@ The criteria reason detail says "duplicates excluded from unique criteria count"
 
 **Structural vs. conventional verdict isolation: how to verify.**
 The LLM-judge oracle change achieves structural isolation by: (1) storing judge output in a single local variable (`judgeText`), (2) using it in exactly one place (a `reasons.push()`), and (3) computing all gate values before the `await` call so no gate arithmetic can reference the variable. To verify structural isolation, grep the variable name and confirm every reference is non-arithmetic. If a variable appears in an `*` or `+` expression feeding a gate, it is conventional isolation (fragile), not structural.
+
+---
+
+## Redis write-through mirror patterns (from redis-layer QA, 2026-06-21)
+
+**Seed/hydration race corrupts Redis on restart.**
+When a sync seed runs before async hydration completes, every `store.setAgent()` / `store.setBounty()` call in the seed fires mirror writes that overwrite Redis with seed defaults. Hydration then reads the corrupted data. Fix: never seed through the store's public setters during the hydration grace period; use direct Map mutations, or make seedStore async and await hydration.
+
+**How to apply:** Whenever reviewing a write-through mirror + boot-time hydration pattern, verify that the seed path does NOT call the same store setters that trigger mirror writes. Hydration and seeding must be mutually exclusive.
+
+---
+
+**appendEvent / mutating sub-collections must also mirror.**
+If a store method mutates a nested array (e.g., `run.events.push(event)`) instead of replacing the top-level object, the corresponding mirror call must fire in that mutation method too — not just in the parent `setRun`. Checking only the `setXxx` methods for mirror calls misses mutation-only paths.
+
+**How to apply:** When auditing mirror call coverage, search for ALL methods that mutate entities, not just the ones that replace them outright.
+
+---
+
+**incrementReputation must mirror the full agent, not just the leaderboard score.**
+The leaderboard sorted-set score and the agent hash can diverge if only one is mirrored after a reputation change. On hydration: sorted-set restores correct ranking, but agent objects hydrate from the hash — showing stale reputation values in the API.
+
+**How to apply:** Verify that any partial mirror (e.g., a leaderboard score update) is accompanied by a full-object mirror if the object contains a denormalized copy of the same field.
+
+---
+
+**Dead Redis client after reconnect exhaustion still held in `_client`.**
+When `reconnectStrategy` returns an Error to stop reconnecting, the client emits `'end'` but the module-level `_client` variable still holds the closed client object (not null). Subsequent `getRedis()` calls return the dead client; mirror commands throw and are swallowed by try/catch. Fix: set `_client = null` in the reconnect-limit branch or `'end'` event handler.
+
+**How to apply:** When reviewing Redis singleton clients with reconnect limits, verify that the client reference is nulled out when the client permanently closes, so callers get a clean null instead of a dead object.

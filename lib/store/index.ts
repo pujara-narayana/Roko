@@ -1,5 +1,6 @@
 /**
- * In-memory store — Redis fallback.
+ * In-memory store — synchronous source of truth.
+ * Redis is a write-through mirror (fire-and-forget) and provides boot-time hydration.
  * Singleton module. All state lives here for the demo path.
  * Supports sorted sets for the leaderboard (like Redis ZADD/ZRANGE).
  */
@@ -8,6 +9,10 @@ import type {
   Bounty, Agent, Escrow, Run, RunEvent,
   Submission, OracleResult, OracleBatchResult,
 } from '../types';
+import {
+  mirrorBounty, mirrorAgent, mirrorReputation, mirrorEscrow,
+  mirrorRun, mirrorSubmission, mirrorOracleResult, mirrorOracleBatch,
+} from '../redis/mirror';
 
 // ─── Sorted-set helper (simulates Redis sorted set) ───────────────────────────
 
@@ -62,6 +67,7 @@ class InMemoryStore {
 
   setBounty(b: Bounty) {
     this.bounties.set(b.bountyId, b);
+    mirrorBounty(b).catch(() => {});
   }
 
   getBounty(id: string): Bounty | undefined {
@@ -79,6 +85,7 @@ class InMemoryStore {
   setAgent(a: Agent) {
     this.agents.set(a.agentId, a);
     this.leaderboard.zadd(a.agentId, a.reputation);
+    mirrorAgent(a).catch(() => {});
   }
 
   getAgent(id: string): Agent | undefined {
@@ -97,12 +104,19 @@ class InMemoryStore {
     if (!agent) return;
     agent.reputation = Math.max(0, agent.reputation + by);
     this.leaderboard.zadd(agentId, agent.reputation);
+    // Mirror canonical score (not a delta) — avoids double-counting if retried.
+    mirrorReputation(agentId, agent.reputation).catch(() => {});
+    // Also mirror the full agent hash so agent:{id} stays consistent with
+    // the leaderboard sorted set. Without this the hash retains the stale
+    // pre-increment reputation after a process restart.
+    mirrorAgent(agent).catch(() => {});
   }
 
   // ── Escrow ops ──────────────────────────────────────────────────────────────
 
   setEscrow(e: Escrow) {
     this.escrows.set(e.bountyId, e);
+    mirrorEscrow(e).catch(() => {});
   }
 
   getEscrow(bountyId: string): Escrow | undefined {
@@ -113,6 +127,7 @@ class InMemoryStore {
 
   setRun(r: Run) {
     this.runs.set(r.runId, r);
+    mirrorRun(r).catch(() => {});
   }
 
   getRun(id: string): Run | undefined {
@@ -123,6 +138,8 @@ class InMemoryStore {
     const run = this.runs.get(runId);
     if (!run) return;
     run.events.push(event);
+    // Mirror the updated Run (with the new event appended) to Redis.
+    mirrorRun(run).catch(() => {});
     // notify SSE subscribers
     const subs = this.sseSubscribers.get(runId) ?? [];
     for (const cb of subs) {
@@ -146,6 +163,7 @@ class InMemoryStore {
 
   setSubmission(s: Submission) {
     this.submissions.set(s.submissionId, s);
+    mirrorSubmission(s).catch(() => {});
   }
 
   getSubmission(id: string): Submission | undefined {
@@ -156,10 +174,12 @@ class InMemoryStore {
 
   setOracleResult(r: OracleResult) {
     this.oracleResults.set(r.submissionId, r);
+    mirrorOracleResult(r).catch(() => {});
   }
 
   setOracleBatch(r: OracleBatchResult) {
     this.oracleBatchResults.set(r.bountyId, r);
+    mirrorOracleBatch(r).catch(() => {});
   }
 
   getOracleBatch(bountyId: string): OracleBatchResult | undefined {
