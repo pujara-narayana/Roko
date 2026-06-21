@@ -1,0 +1,232 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════
+   Marbled Ink Design System — CSS Custom Properties
+   These are the locked tokens. All components use these.
+   ═══════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Ink base palette ── */
+  --ink-900: #07060D;
+  --ink-800: #0D0B1A;
+  --ink-700: #15122B;
+
+  /* ── Paint accent palette ── */
+  --paint-orange: #FF7A2F;
+  --paint-magenta: #FF2E8B;
+  --paint-blue: #2E7BFF;
+  --paint-violet: #7A3CFF;
+  --paint-cyan: #21E6C1;
+
+  /* ── Semantic colors ── */
+  --success: #21E6C1;
+  --danger: #FF3D6E;
+  --warn: #FFB23E;
+
+  /* ── Foreground ── */
+  --fg: #F4F2FF;
+  --fg-muted: #A39FC4;
+
+  /* ── Borders ── */
+  --border: rgba(255, 255, 255, 0.10);
+
+  /* ── Glass panel ── */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+
+  /* ── CTA gradient ── */
+  --gradient-cta: linear-gradient(100deg, #FF2E8B, #7A3CFF, #2E7BFF);
+
+  /* ── Wave mesh layers ── */
+  --wave-mesh:
+    radial-gradient(ellipse 80% 60% at 20% 30%, rgba(46, 123, 255, 0.20) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 80% at 80% 70%, rgba(122, 60, 255, 0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 50% at 50% 10%, rgba(255, 46, 139, 0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 40% at 10% 80%, rgba(33, 230, 193, 0.10) 0%, transparent 60%);
+
+  /* Map to Tailwind-readable vars */
+  --background: var(--ink-900);
+  --foreground: var(--fg);
+}
+
+/* ── Tailwind v4 theme extension ── */
+@theme inline {
+  --color-ink-900: var(--ink-900);
+  --color-ink-800: var(--ink-800);
+  --color-ink-700: var(--ink-700);
+  --color-paint-orange: var(--paint-orange);
+  --color-paint-magenta: var(--paint-magenta);
+  --color-paint-blue: var(--paint-blue);
+  --color-paint-violet: var(--paint-violet);
+  --color-paint-cyan: var(--paint-cyan);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+
+  /* Font families */
+  --font-display: "Clash Display", "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+
+  /* Border radius */
+  --radius-card: 20px;
+  --radius-pill: 999px;
+
+  /* Easing */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Base reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  background: var(--ink-900);
+  color: var(--fg);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Typography utilities ── */
+.font-display { font-family: var(--font-display); }
+.font-mono    { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ── Glass card ── */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+/* ── Gradient CTA button ── */
+.btn-cta {
+  background: var(--gradient-cta);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.btn-cta:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+/* ── Wave animation (hero) ── */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes wave-drift {
+    0%   { transform: translate(0, 0) rotate(0deg) scale(1); }
+    33%  { transform: translate(2%, 1.5%) rotate(1.5deg) scale(1.02); }
+    66%  { transform: translate(-1.5%, 2%) rotate(-1deg) scale(0.99); }
+    100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  }
+
+  .wave-animated {
+    animation: wave-drift 14s ease-in-out infinite;
+  }
+}
+
+/* ── Shimmer skeleton ── */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--ink-800) 25%,
+    var(--ink-700) 50%,
+    var(--ink-800) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* ── Pulse animation for "working" states ── */
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 123, 255, 0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(46, 123, 255, 0); }
+}
+
+.pulse-blue {
+  animation: pulse-blue 2s ease-in-out infinite;
+}
+
+/* ── Pulse animations (functional colors) ── */
+@keyframes pulse-magenta {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 46, 139, 0.45); }
+  50%       { box-shadow: 0 0 0 7px rgba(255, 46, 139, 0); }
+}
+.pulse-magenta { animation: pulse-magenta 2s ease-in-out infinite; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.8); }
+}
+.pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+
+/* ── Entry animations (stagger, slide-up) ── */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .anim-slide-up { animation: slide-up 260ms var(--ease-spring) both; }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .anim-fade-in { animation: fade-in 320ms ease both; }
+
+  @keyframes bar-fill { from { width: 0; } }
+  .anim-bar { animation: bar-fill 600ms var(--ease-spring) both; animation-delay: 100ms; }
+
+  /* Escrow token flight: from left rail toward winner card */
+  @keyframes token-flight {
+    0%   { opacity: 0; transform: translate(0, 0) scale(0.6); }
+    15%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(220px, -40px) scale(1.4); }
+  }
+  .anim-token-flight { animation: token-flight 700ms var(--ease-spring) forwards; }
+}
+
+/* Reduced-motion: freeze the wave, no drift */
+@media (prefers-reduced-motion: reduce) {
+  .wave-animated { animation: none !important; }
+}
+
+/* ── Glow utilities (color-tinted, never gray) ── */
+.glow-cyan   { box-shadow: 0 0 32px -8px rgba(33, 230, 193, 0.45); }
+.glow-orange { box-shadow: 0 0 32px -8px rgba(255, 122, 47, 0.45); }
+.glow-magenta{ box-shadow: 0 0 32px -8px rgba(255, 46, 139, 0.40); }
+.glow-blue   { box-shadow: 0 0 32px -8px rgba(46, 123, 255, 0.40); }
+
+/* ── Card hover lift ── */
+.card-hover { transition: transform 180ms var(--ease-spring), box-shadow 180ms ease, border-color 180ms ease; }
+.card-hover:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.18); }
+
+/* ── Focus ring (a11y) ── */
+:focus-visible { outline: 2px solid var(--paint-blue); outline-offset: 2px; border-radius: 6px; }
+
+/* ── Line clamp ── */
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ── Hide scrollbar (chip strips) ── */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--ink-800); }
+::-webkit-scrollbar-thumb { background: var(--ink-700); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
