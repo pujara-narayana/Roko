@@ -30,23 +30,50 @@ export interface CompanyRecord {
   website?: string;
 }
 
-export type SubmissionSource = 'browserbase' | 'seeded_cache' | 'seeded_corpus';
+export type SubmissionSource =
+  | 'browserbase'
+  | 'seeded_cache'
+  | 'seeded_corpus'
+  | 'claude'
+  | 'pika'
+  | 'midjourney';
 
 export interface SubmissionFulfillment {
   durationMs: number;
   retries: number;
   usedFallback: boolean;
+  engine?: string;          // provider that produced the work, e.g. 'claude', 'browserbase'
+  awaitingKey?: ProviderId; // set when a required provider key is missing
+}
+
+// ─── Generic deliverable (non-data task types) ───────────────────────────────
+// Data/research bounties verify against `records`. Every other task type
+// (code, presentation, image, video) carries a generic deliverable instead.
+
+export type DeliverableKind = 'code' | 'presentation' | 'image' | 'video';
+
+export interface GenericDeliverable {
+  kind: DeliverableKind;
+  title: string;
+  summary: string;          // short human-readable description of what was produced
+  body?: string;            // code text / slide outline / prompt expansion
+  artifactUrl?: string;     // link to generated media (when a provider returns one)
+  previewUrl?: string;      // thumbnail / poster
+  durationSec?: number;     // video length, for verification
+  meta?: Record<string, unknown>;
+  awaitingKey?: ProviderId; // provider not configured — nothing was generated
 }
 
 export interface Submission {
   submissionId: string;
   agentId: string;
   bountyId: string;
-  records: CompanyRecord[];
+  records: CompanyRecord[];        // populated for data-research tasks (else [])
+  deliverable?: GenericDeliverable; // populated for code/ppt/image/video tasks
   source: SubmissionSource;
   fulfillment: SubmissionFulfillment;
   submittedAt: string; // ISO 8601
-  status: 'pending' | 'submitted' | 'failed_retrieval' | 'timed_out';
+  status: 'pending' | 'submitted' | 'failed_retrieval' | 'timed_out' | 'awaiting_key';
 }
 
 export interface OracleSubScores {
@@ -107,6 +134,10 @@ export interface Escrow {
 
 export type BountyStatus = 'open' | 'in_progress' | 'settled' | 'failed';
 
+// The hero data/research loop is 'data-research'; every other type routes to a
+// generic Claude/provider deliverable + LLM-judge verification path.
+export type TaskType = 'data-research' | 'code' | 'presentation' | 'image' | 'video';
+
 export interface Bounty {
   bountyId: string;
   title: string;
@@ -115,6 +146,10 @@ export interface Bounty {
   reward: number;
   poster: string;
   status: BountyStatus;
+  taskType?: TaskType;             // defaults to 'data-research' when omitted
+  verification?: string;           // poster's "How will you verify it?" text
+  timeToCompleteMin?: number;      // hard cap surfaced from the post wizard
+  attachments?: string[];          // filenames (stubbed — no real upload)
   requirements?: AcceptanceRequirements;
   requirementsId?: string;
   escrowId?: string;
@@ -122,11 +157,30 @@ export interface Bounty {
   updatedAt: string;
 }
 
+// ─── Agent specialties & provider wiring ──────────────────────────────────────
+
+export type AgentSpecialty = 'research' | 'code' | 'presentation' | 'image' | 'video';
+
+export type ProviderId = 'anthropic' | 'browserbase' | 'pika' | 'midjourney' | 'arize';
+
+export interface ProviderStatus {
+  id: ProviderId;
+  label: string;
+  configured: boolean;
+  docsUrl?: string;
+}
+
 export interface Agent {
   agentId: string;
   name: string;
   model: string;
   description: string;
+  specialty: AgentSpecialty;       // what this agent is best at
+  emoji: string;                   // avatar glyph
+  tools: string[];                 // shared toolset (all agents) + specialty providers
+  providers: ProviderId[];         // providers this agent depends on
+  categories: string[];            // marketplace categories it competes in
+  verified: boolean;               // verified badge on the leaderboard
   reputation: number;     // 0–1000 points
   earningsUsd: number;
   wins: number;

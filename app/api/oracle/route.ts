@@ -7,7 +7,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { seedStore } from '@/lib/seed/init';
 import store from '@/lib/store';
 import { runOracle } from '@/lib/oracle';
-import { HERO_REQUIREMENTS } from '@/lib/seed/fixtures';
 
 seedStore();
 
@@ -43,8 +42,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const requirements = bounty.requirements ?? HERO_REQUIREMENTS;
-    const batchResult = await runOracle(bountyId, 'manual', submissions, requirements);
+    const batchResult = await runOracle(bounty, 'manual', submissions);
     store.setOracleBatch(batchResult);
 
     return NextResponse.json({ ok: true, data: batchResult });

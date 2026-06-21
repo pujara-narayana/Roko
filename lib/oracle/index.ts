@@ -18,9 +18,12 @@
 
 import type {
   Submission, AcceptanceRequirements, OracleResult,
-  OracleBatchResult, CompanyRecord, GateResult, OracleReason,
+  OracleBatchResult, CompanyRecord, GateResult, OracleReason, Bounty,
 } from '../types';
 import { persistOracleResults } from '../persist';
+import { judgeDeliverable } from './judge';
+import { HERO_REQUIREMENTS } from '../seed/fixtures';
+import { arize } from '../providers';
 
 // ─── Email validation (RFC-5322 simplified) ───────────────────────────────────
 
@@ -53,7 +56,7 @@ function matchesCriteria(
   if (record.geo !== requirements.geo) {
     failures.push(`geo mismatch: expected "${requirements.geo}", got "${record.geo}"`);
   }
-  if (record.revenue < requirements.minRevenue) {
+  if ((Number(record.revenue) || 0) < requirements.minRevenue) {
     failures.push(`revenue ${record.revenue} < required ${requirements.minRevenue}`);
   }
 
@@ -66,23 +69,20 @@ function findDuplicates(records: CompanyRecord[]): CompanyRecord[][] {
   // Duplicate = same company name (case-insensitive) appearing more than once
   const byName = new Map<string, CompanyRecord[]>();
   for (const r of records) {
-    const key = r.name.toLowerCase().trim();
+    const key = String(r.name ?? '').toLowerCase().trim();
     if (!byName.has(key)) byName.set(key, []);
     byName.get(key)!.push(r);
   }
   return [...byName.values()].filter(group => group.length > 1);
 }
 
-// ─── Semantic stub ────────────────────────────────────────────────────────────
-// In production: call Claude with low temperature to judge fuzzy criteria.
-// For demo path: returns a fixed deterministic score based on agentId.
+// ─── Semantic score ───────────────────────────────────────────────────────────
+// Derived from the deterministic checks themselves (criteria match + validity)
+// rather than agent identity, so it tracks actual corpus quality. In production
+// this is where a low-temperature Claude judge for fuzzy criteria would slot in.
 
-function semanticScore(agentId: string): number {
-  switch (agentId) {
-    case 'agent-charlie': return 98; // passes
-    case 'agent-beta':    return 82; // below threshold
-    default:              return 70; // agent-alpha
-  }
+function semanticScore(criteriaMatchPct: number, validityPct: number): number {
+  return Math.round(Math.min(100, criteriaMatchPct * 0.6 + validityPct * 0.4));
 }
 
 // ─── Score one submission ─────────────────────────────────────────────────────
@@ -197,8 +197,8 @@ export function scoreSubmission(
     failingRows: invalidEmails.slice(0, 5),
   });
 
-  // ── 6. Semantic/LLM judge (stubbed) ──────────────────────────────────────
-  const semanticPct = semanticScore(agentId);
+  // ── 6. Semantic/LLM judge (derived from deterministic checks) ─────────────
+  const semanticPct = semanticScore(criteriaMatchPct, validityPct);
   reasons.push({
     kind: 'criteria',
     ok: semanticPct >= 90,
@@ -278,25 +278,31 @@ export function scoreSubmission(
 // ─── Score all submissions (batch) ────────────────────────────────────────────
 
 export async function runOracle(
-  bountyId: string,
+  bounty: Bounty,
   runId: string,
   submissions: Submission[],
-  requirements: AcceptanceRequirements,
 ): Promise<OracleBatchResult> {
+  const bountyId = bounty.bountyId;
+  const taskType = bounty.taskType ?? 'data-research';
+  const requirements = bounty.requirements ?? HERO_REQUIREMENTS;
+
   // Guard: if no submissions at all, return a well-formed no-pass result immediately
   if (submissions.length === 0) {
     const emptyResult: OracleBatchResult = {
-      bountyId,
-      results: [],
-      winner: undefined,
-      fallbackWinner: undefined,
-      escrowAction: 'return',
+      bountyId, results: [], winner: undefined, fallbackWinner: undefined, escrowAction: 'return',
     };
     await persistOracleResults(runId, bountyId, [], emptyResult);
     return emptyResult;
   }
 
-  const results = submissions.map(s => scoreSubmission(s, requirements));
+  // Branch per submission: deliverable tasks → LLM-judge; data tasks → deterministic oracle.
+  const results = await Promise.all(
+    submissions.map((s) =>
+      taskType !== 'data-research' || s.deliverable
+        ? judgeDeliverable(s, bounty)
+        : Promise.resolve(scoreSubmission(s, requirements)),
+    ),
+  );
 
   // Find winner (first passing submission)
   const winner = results.find(r => r.verdict === 'pass');
@@ -306,12 +312,18 @@ export async function runOracle(
   const fallbackWinner = winner ? undefined : best?.agentId;
 
   const batchResult: OracleBatchResult = {
-    bountyId,
-    results,
-    winner: winner?.agentId,
-    fallbackWinner,
+    bountyId, results, winner: winner?.agentId, fallbackWinner,
     escrowAction: winner ? 'release' : 'return',
   };
+
+  // Non-blocking observability: log each verification to Arize (no-op if unset).
+  for (const r of results) {
+    arize.logOracleScore({
+      runId, bountyId, agentId: r.agentId, verdict: r.verdict, overallScore: r.overallScore,
+      criteriaMatch: r.subScores.criteriaMatch, completeness: r.subScores.completeness,
+      validity: r.subScores.validity, taskType,
+    });
+  }
 
   // Persist to disk
   await persistOracleResults(runId, bountyId, results, batchResult);

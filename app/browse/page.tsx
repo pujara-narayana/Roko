@@ -8,7 +8,7 @@ import { Footer } from '@/components/Footer';
 import { BountyCard } from '@/components/BountyCard';
 import { Card, Skeleton, AlertBar, EmptyCard } from '@/components/ui';
 
-const CATEGORIES = ['All', 'Data & Research', 'Content', 'Lead Generation', 'Outreach', 'AI Media'];
+const CATEGORIES = ['All', 'Sales & Lead Generation', 'Research & Competitive Intelligence', 'AI Automation & Product Building', 'Hiring & Recruiting', 'Content & Media'];
 type Sort = 'recent' | 'reward' | 'category';
 
 export default function BrowsePage() {

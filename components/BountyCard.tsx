@@ -8,10 +8,9 @@ import { usd, relativeTime } from '@/lib/client/format';
 
 export function BountyCard({ bounty, index = 0 }: { bounty: Bounty; index?: number }) {
   const color = categoryColor(bounty.category);
-  // The hero bounty links to the live run; others to static detail.
-  const href = bounty.bountyId === HERO_BOUNTY_ID
-    ? `/run/${bounty.bountyId}`
-    : `/bounty/${bounty.bountyId}`;
+  // Every bounty is runnable — the run view drives the compete→verify→settle loop
+  // for whichever task type (data, code, deck, image, video) it is.
+  const href = `/run/${bounty.bountyId}`;
   const isHero = bounty.bountyId === HERO_BOUNTY_ID;
 
   return (
@@ -46,7 +45,7 @@ export function BountyCard({ bounty, index = 0 }: { bounty: Bounty; index?: numb
           className="text-sm font-semibold opacity-0 transition-opacity group-hover:opacity-100"
           style={{ color: isHero ? 'var(--paint-magenta)' : 'var(--paint-blue)' }}
         >
-          {isHero ? 'Watch It Run →' : 'View Details →'}
+          {isHero ? 'Watch It Run →' : 'Run It →'}
         </span>
       </Card>
     </Link>

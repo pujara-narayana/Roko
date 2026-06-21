@@ -5,28 +5,21 @@ import type { AcceptanceRequirements, Bounty, Escrow } from '@/lib/types';
 import { useRunStream } from '@/lib/client/useRunStream';
 import { useElapsed } from '@/lib/client/useElapsed';
 import { Card, CategoryBadge, AlertBar, EmptyCard } from '@/components/ui';
-import { categoryColor } from '@/lib/client/constants';
+import { categoryColor, agentName, HERO_BOUNTY_ID } from '@/lib/client/constants';
 import { usd, elapsedLabel, cleanText } from '@/lib/client/format';
 import { StageIndicator } from './StageIndicator';
 import { RequirementsBlock } from './RequirementsBlock';
 import { AgentCard } from './AgentCard';
 import { VerdictCard } from './VerdictCard';
 import { SettlementPanel } from './SettlementPanel';
-
-const AGENT_NAMES: Record<string, string> = {
-  'agent-alpha': 'Agent Alpha',
-  'agent-beta': 'Agent Beta',
-  'agent-charlie': 'Agent Charlie',
-};
+import { ProviderKeyModal } from '@/components/ProviderKeyModal';
 
 const STAGE_HEADERS: Record<string, { label: string; desc: string; duration: string }> = {
   intake: { label: 'POST', desc: 'Intake agent compiles the brief into checkable acceptance requirements.', duration: '~10s' },
-  compete: { label: 'COMPETE', desc: 'Three agents retrieve and submit results in parallel.', duration: '~90s' },
+  compete: { label: 'COMPETE', desc: 'Specialist agents attempt the bounty in parallel.', duration: '~90s' },
   verify: { label: 'VERIFY', desc: 'The oracle scores each submission against the locked criteria.', duration: '~60s' },
   settle: { label: 'SETTLE', desc: 'Escrow auto-releases to the winner — or returns to the poster.', duration: '~10s' },
 };
-
-function agentName(id: string) { return AGENT_NAMES[id] ?? id; }
 
 export function RunView({
   bounty, requirements, escrow,
@@ -37,6 +30,13 @@ export function RunView({
 }) {
   const run = useRunStream(bounty.bountyId);
   const [autoStarted, setAutoStarted] = useState(false);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
+  const [keyModalDismissed, setKeyModalDismissed] = useState(false);
+
+  // Pop the "waiting for key" modal the first time a missing-provider task surfaces.
+  useEffect(() => {
+    if (run.awaitingKey && !keyModalDismissed) setKeyModalOpen(true);
+  }, [run.awaitingKey, keyModalDismissed]);
 
   // Timer reflects real pipeline time: start only once the run has actually
   // started (runId received from POST), not on the click before it resolves.
@@ -79,6 +79,16 @@ export function RunView({
       {run.error && (
         <div className="mb-4"><AlertBar tone="danger">Connection lost — {cleanText(run.error)}. Showing last known state.</AlertBar></div>
       )}
+      {run.awaitingKey && (
+        <div className="mb-4">
+          <AlertBar tone="warn">
+            🔑 This task needs the {run.awaitingKey} key — generation is wired but waiting on the API key.{' '}
+            <button onClick={() => { setKeyModalDismissed(false); setKeyModalOpen(true); }} className="font-semibold underline">
+              Details
+            </button>
+          </AlertBar>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* ── LEFT RAIL (sticky) ── */}
@@ -87,9 +97,11 @@ export function RunView({
             <Card className="p-5" style={{ background: 'var(--ink-800)' }}>
               <div className="flex items-center gap-2">
                 <CategoryBadge category={bounty.category} color={color} />
-                <span className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--gradient-cta)', color: '#fff' }}>
-                  Hero Bounty
-                </span>
+                {bounty.bountyId === HERO_BOUNTY_ID && (
+                  <span className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--gradient-cta)', color: '#fff' }}>
+                    Hero Bounty
+                  </span>
+                )}
               </div>
               <h1 className="mt-3 font-display text-[22px] font-bold leading-tight" style={{ color: 'var(--fg)' }}>
                 {bounty.title}
@@ -202,6 +214,12 @@ export function RunView({
           )}
         </main>
       </div>
+
+      <ProviderKeyModal
+        provider={run.awaitingKey ?? null}
+        open={keyModalOpen}
+        onClose={() => { setKeyModalOpen(false); setKeyModalDismissed(true); }}
+      />
     </div>
   );
 }

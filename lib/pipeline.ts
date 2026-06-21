@@ -10,7 +10,7 @@ import { v4 as uuid } from 'uuid';
 import type { Bounty, Run, RunStage } from './types';
 import store from './store';
 import { createEmitter } from './sse';
-import { runCompetition } from './agents';
+import { runCompetition, planCompetitors } from './agents';
 import { runOracle } from './oracle';
 import { releaseEscrow, returnEscrow, fundEscrow } from './escrow';
 import { persistRequirements } from './persist';
@@ -108,20 +108,29 @@ export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
     store.setBounty(updatedBounty);
 
     // ── COMPETE stage ───────────────────────────────────────────────────────
+    const plan = planCompetitors(bounty.taskType ?? 'data-research');
     emit({
       stage: 'compete',
       status: 'in_progress',
       ts: new Date().toISOString(),
-      payload: { message: 'Dispatching 3 agents…', agentCount: 3 },
+      payload: {
+        message: `Dispatching ${plan.length} ${plan.length === 1 ? 'agent' : 'agents'}…`,
+        agentCount: plan.length,
+        agentIds: plan.map((p) => p.agent.agentId),
+      },
     });
 
     startHeartbeat('compete');
 
-    const submissions = await runCompetition(bountyId, runId, (e) => {
+    const submissions = await runCompetition(bounty, runId, (e) => {
       emit(e as Parameters<typeof emit>[0]);
     });
 
     stopHeartbeat();
+
+    // A media task with no provider key produces awaiting-key submissions —
+    // surface the provider so the client shows the "waiting for the key" popup.
+    const awaitingKey = submissions.find((s) => s.fulfillment.awaitingKey)?.fulfillment.awaitingKey ?? null;
 
     emit({
       stage: 'compete',
@@ -130,6 +139,7 @@ export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
       payload: {
         submissionCount: submissions.length,
         submissionIds: submissions.map(s => s.submissionId),
+        awaitingKey,
       },
     });
 
@@ -160,8 +170,8 @@ export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
       await sleep(300);
     }
 
-    // Run oracle (deterministic)
-    const batchResult = await runOracle(bountyId, runId, submissions, requirements);
+    // Run oracle (deterministic data checks, or Claude-judge for deliverables)
+    const batchResult = await runOracle(bounty, runId, submissions);
     store.setOracleBatch(batchResult);
 
     stopHeartbeat();
@@ -248,6 +258,7 @@ export async function executePipeline(run: Run, bounty: Bounty): Promise<void> {
         winner: batchResult.winner,
         fallbackWinner: batchResult.fallbackWinner,
         escrowAction: batchResult.escrowAction,
+        awaitingKey,
         leaderboard: store.listAgentsByReputation().slice(0, 5).map(a => ({
           agentId: a.agentId,
           name: a.name,

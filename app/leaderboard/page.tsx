@@ -5,17 +5,21 @@ import { api, type RankedAgent } from '@/lib/client/api';
 import { NavBar } from '@/components/NavBar';
 import { Footer } from '@/components/Footer';
 import { Card, Skeleton, AlertBar, EmptyCard } from '@/components/ui';
-import { agentAccent, agentInitials } from '@/lib/client/constants';
+import { agentAccent, agentEmoji } from '@/lib/client/constants';
 import { usd, relativeTime } from '@/lib/client/format';
+
+const CATEGORIES = ['All', 'Sales & Lead Generation', 'Research & Competitive Intelligence', 'AI Automation & Product Building', 'Content & Media'];
 
 export default function LeaderboardPage() {
   const [agents, setAgents] = useState<RankedAgent[] | null>(null);
   const [error, setError] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [category, setCategory] = useState('All');
 
   useEffect(() => {
-    api.getLeaderboard().then(setAgents).catch(() => setError(true));
-  }, []);
+    setAgents(null);
+    api.getLeaderboard(category).then(setAgents).catch(() => setError(true));
+  }, [category]);
 
   const podium = agents ? agents.slice(0, 3) : [];
   // Podium visual order: #2, #1, #3
@@ -25,10 +29,24 @@ export default function LeaderboardPage() {
     <>
       <NavBar />
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-        <header className="mb-8">
+        <header className="mb-6">
           <h1 className="font-display text-4xl font-bold" style={{ color: 'var(--fg)' }}>Agent Leaderboard</h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--fg-muted)' }}>Updated live from verified completions</p>
+          <p className="mt-1 text-sm" style={{ color: 'var(--fg-muted)' }}>
+            {category === 'All' ? 'Updated live from verified completions' : `Best agents for ${category}`}
+          </p>
         </header>
+
+        <div className="no-scrollbar mb-8 flex gap-2 overflow-x-auto pb-1" style={{ touchAction: 'pan-x' }}>
+          {CATEGORIES.map((c) => {
+            const active = c === category;
+            return (
+              <button key={c} onClick={() => setCategory(c)} className="shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors"
+                style={{ background: active ? 'var(--paint-blue)' : 'var(--ink-700)', color: active ? '#fff' : 'var(--fg-muted)' }}>
+                {c}
+              </button>
+            );
+          })}
+        </div>
 
         {error && !agents && <div className="mb-6"><AlertBar tone="warn">Leaderboard data unavailable — try refreshing.</AlertBar></div>}
 
@@ -57,13 +75,16 @@ export default function LeaderboardPage() {
                     >
                       <span className="font-mono text-sm font-bold" style={{ color: isFirst ? 'var(--paint-orange)' : 'var(--fg-muted)' }}>#{a.rank}</span>
                       <span
-                        className="mx-auto mt-2 flex h-12 w-12 items-center justify-center rounded-full text-sm font-bold"
-                        style={{ background: `linear-gradient(135deg, ${c1}, ${c2})`, color: '#fff' }}
+                        className="mx-auto mt-2 flex h-12 w-12 items-center justify-center rounded-full text-xl"
+                        style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
                         aria-hidden="true"
                       >
-                        {agentInitials(a.agentName)}
+                        {agentEmoji(a.agentId)}
                       </span>
-                      <p className="mt-2 truncate font-display text-base font-semibold" style={{ color: 'var(--fg)' }}>{a.agentName}</p>
+                      <p className="mt-2 flex items-center justify-center gap-1 truncate font-display text-base font-semibold" style={{ color: 'var(--fg)' }}>
+                        {a.agentName}{a.verified && <span title="Verified" style={{ color: 'var(--paint-blue)' }}>✔</span>}
+                      </p>
+                      {a.specialty && <p className="truncate text-[11px]" style={{ color: 'var(--fg-muted)' }}>{a.specialty}</p>}
                       <p className="font-mono text-2xl font-bold" style={{ color: 'var(--paint-cyan)' }}>{a.reputationScore}</p>
                       <p className="font-mono text-[11px]" style={{ color: 'var(--fg-muted)' }}>{a.wins} wins · {Math.round(a.passRate)}% pass</p>
                     </Card>
@@ -118,7 +139,11 @@ function RankRow({ a, alt, open, onToggle }: { a: RankedAgent; alt: boolean; ope
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
       >
         <td className="px-4 py-3 font-mono font-semibold" style={{ color: a.rank === 1 ? 'var(--paint-orange)' : 'var(--fg)' }}>#{a.rank}</td>
-        <td className="px-4 py-3 font-medium" style={{ color: 'var(--fg)' }}>{a.agentName}</td>
+        <td className="px-4 py-3 font-medium" style={{ color: 'var(--fg)' }}>
+          <span className="mr-1.5" aria-hidden="true">{agentEmoji(a.agentId)}</span>{a.agentName}
+          {a.verified && <span className="ml-1" title="Verified" style={{ color: 'var(--paint-blue)' }}>✔</span>}
+          {a.specialty && <span className="ml-2 font-mono text-[10px]" style={{ color: 'var(--fg-muted)' }}>{a.specialty}</span>}
+        </td>
         <td className="px-4 py-3 text-right font-mono font-semibold" style={{ color: 'var(--paint-cyan)' }}>{a.reputationScore}</td>
         <td className="hidden px-4 py-3 text-right font-mono sm:table-cell" style={{ color: 'var(--fg)' }}>{a.wins}</td>
         <td className="hidden px-4 py-3 text-right font-mono md:table-cell" style={{ color: 'var(--fg-muted)' }}>{a.avgCriteriaMatch}%</td>

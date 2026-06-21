@@ -20,7 +20,7 @@ import type { RunEvent, OracleReason, GateResult, OracleSubScores } from '@/lib/
 
 export type StageKey = 'intake' | 'compete' | 'verify' | 'settle';
 export type StageState = 'pending' | 'active' | 'complete';
-export type AgentStatus = 'queued' | 'working' | 'submitted' | 'failed';
+export type AgentStatus = 'queued' | 'working' | 'submitted' | 'failed' | 'awaiting';
 
 export interface AgentCardState {
   agentId: string;
@@ -30,6 +30,8 @@ export interface AgentCardState {
   totalSteps: number;
   recordCount?: number;
   source?: string;
+  deliverableTitle?: string;   // non-data tasks
+  awaitingKey?: string;        // provider id when blocked on a missing key
 }
 
 export interface VerdictState {
@@ -75,6 +77,8 @@ export interface PipelineState {
   // settle
   settlement?: SettlementState;
   leaderboard?: Array<{ agentId: string; name: string; reputationScore: number }>;
+  // provider gating — set when a media task is blocked on a missing key
+  awaitingKey?: string;
   // lifecycle
   connection: ConnectionState;
   complete: boolean;
@@ -127,6 +131,10 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
   let state: PipelineState = { ...prev, lastSeq: event.seq };
   const p = (event.payload ?? {}) as Record<string, unknown>;
 
+  // Heartbeats only keep the SSE stream alive — they carry no state transition
+  // and must never re-activate an already-completed stage.
+  if (p.heartbeat) return state;
+
   switch (event.stage) {
     case 'intake': {
       if (event.status === 'in_progress') {
@@ -149,20 +157,30 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
     case 'compete': {
       state = { ...state, activeStage: 'compete', stages: setStage(state.stages, 'compete', 'active') };
       const agentId = p.agentId as string | undefined;
+      // Roll-up "submitted" event (no agentId) carries the run-level awaitingKey.
+      if (!agentId && p.awaitingKey) {
+        state = { ...state, awaitingKey: p.awaitingKey as string };
+      }
       if (event.status === 'in_progress' && agentId) {
         state = ensureAgent(state, agentId);
         const card = state.agents[agentId];
         const logLine = p.logLine as string | undefined;
         const nextLogs = logLine ? [...card.logLines, logLine].slice(-LOG_CAP) : card.logLines;
+        const isAwaiting = !!p.awaitingKey;
         state = {
           ...state,
+          awaitingKey: isAwaiting ? (p.awaitingKey as string) : state.awaitingKey,
           agents: {
             ...state.agents,
             [agentId]: {
               ...card,
-              status: 'working',
+              status: isAwaiting ? 'awaiting' : 'working',
+              awaitingKey: isAwaiting ? (p.awaitingKey as string) : card.awaitingKey,
+              deliverableTitle: (p.deliverableTitle as string) ?? card.deliverableTitle,
               logLines: nextLogs,
-              progressStep: (p.progressStep as number) ?? card.progressStep,
+              // A blocked (awaiting-key) agent is terminal — fill the bar so it
+              // doesn't read as "still working".
+              progressStep: isAwaiting ? ((p.totalSteps as number) ?? card.totalSteps) : ((p.progressStep as number) ?? card.progressStep),
               totalSteps: (p.totalSteps as number) ?? card.totalSteps,
             },
           },
@@ -180,6 +198,7 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
               status: 'submitted',
               recordCount: p.recordCount as number | undefined,
               source: p.source as string | undefined,
+              deliverableTitle: (p.deliverableTitle as string) ?? card.deliverableTitle,
               progressStep: card.totalSteps,
             },
           },
@@ -272,6 +291,7 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
           stages: setStage(state.stages, 'settle', 'complete'),
           activeStage: null,
           complete: true,
+          awaitingKey: (p.awaitingKey as string) ?? state.awaitingKey,
           leaderboard: p.leaderboard as PipelineState['leaderboard'],
         };
       } else if (event.status === 'failed') {
@@ -318,8 +338,13 @@ export function useRunStream(bountyId: string): UseRunStreamResult {
   }, []);
 
   const startPolling = useCallback((runId: string) => {
+    // Cut off a run that never reaches a terminal status (~3 min @ 1.2s) so we
+    // don't poll forever against a dead in-memory run.
+    const MAX_POLLS = 150;
+    let polls = 0;
     const tick = async () => {
       if (completeRef.current) return;
+      if (polls++ >= MAX_POLLS) { dispatch({ type: 'connection', value: 'error' }); return; }
       try {
         const res = await fetch(`/api/runs/${runId}/events?after=${lastSeqRef.current}`);
         const body = await res.json();

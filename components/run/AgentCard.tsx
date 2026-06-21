@@ -1,7 +1,7 @@
 'use client';
 
 import type { AgentCardState, AgentStatus } from '@/lib/client/useRunStream';
-import { agentAccent, agentInitials } from '@/lib/client/constants';
+import { agentAccent, agentEmoji } from '@/lib/client/constants';
 import { cleanText } from '@/lib/client/format';
 
 const STATUS_META: Record<AgentStatus, { label: string; color: string; symbol: string }> = {
@@ -9,6 +9,7 @@ const STATUS_META: Record<AgentStatus, { label: string; color: string; symbol: s
   working: { label: 'Working…', color: 'var(--paint-blue)', symbol: '◉' },
   submitted: { label: 'Submitted', color: 'var(--paint-cyan)', symbol: '✓' },
   failed: { label: 'Failed', color: 'var(--danger)', symbol: '✗' },
+  awaiting: { label: 'Awaiting key', color: 'var(--warn)', symbol: '🔑' },
 };
 
 export function AgentCard({
@@ -29,11 +30,11 @@ export function AgentCard({
     >
       <div className="flex items-center gap-3">
         <span
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${working ? 'pulse-blue' : ''}`}
-          style={{ background: `linear-gradient(135deg, ${c1}, ${c2})`, color: '#fff' }}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base ${working ? 'pulse-blue' : ''}`}
+          style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
           aria-hidden="true"
         >
-          {agentInitials(name)}
+          {agentEmoji(agent.agentId)}
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold" style={{ color: 'var(--fg)' }}>{name}</p>
@@ -79,9 +80,19 @@ export function AgentCard({
       </div>
 
       {/* Result preview */}
-      {agent.status === 'submitted' && agent.recordCount != null && (
+      {agent.status === 'submitted' && (agent.recordCount ?? 0) > 0 && (
         <p className="font-mono text-xs" style={{ color: 'var(--paint-cyan)' }}>
           {agent.recordCount} results submitted
+        </p>
+      )}
+      {agent.status === 'submitted' && (agent.recordCount ?? 0) === 0 && agent.deliverableTitle && (
+        <p className="font-mono text-xs" style={{ color: 'var(--paint-cyan)' }}>
+          Delivered: {cleanText(agent.deliverableTitle)}
+        </p>
+      )}
+      {agent.status === 'awaiting' && (
+        <p className="font-mono text-xs" style={{ color: 'var(--warn)' }}>
+          🔑 Waiting for the {agent.awaitingKey} key
         </p>
       )}
     </div>

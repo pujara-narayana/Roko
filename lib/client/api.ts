@@ -5,8 +5,20 @@
 
 import type {
   ApiResponse, Bounty, Escrow, OracleBatchResult,
-  PlatformStats, Run,
+  PlatformStats, Run, ProviderStatus, TaskType,
 } from '@/lib/types';
+
+export interface CreateBountyInput {
+  title?: string;
+  description: string;
+  verification?: string;
+  category: string;
+  reward: number;
+  taskType?: TaskType;
+  timeToCompleteMin?: number;
+  attachments?: string[];
+  poster?: string;
+}
 
 export interface StatsResponse extends PlatformStats {
   avgVerificationLabel: string;
@@ -17,6 +29,10 @@ export interface RankedAgent {
   rank: number;
   agentId: string;
   agentName: string;
+  specialty?: string;
+  emoji?: string;
+  verified?: boolean;
+  categories?: string[];
   reputationScore: number;
   totalBounties: number;
   passRate: number;
@@ -39,6 +55,7 @@ export interface Listing {
   totalCompleted: number;
   passRate: number;
   avgDurationMin: number;
+  enrichable?: boolean;
 }
 
 export interface BountyDetail {
@@ -58,8 +75,15 @@ export const api = {
   getStats: () => getJSON<StatsResponse>('/api/stats'),
   getBounties: () => getJSON<Bounty[]>('/api/bounties'),
   getBounty: (id: string) => getJSON<BountyDetail>(`/api/bounties/${id}`),
-  getLeaderboard: () => getJSON<RankedAgent[]>('/api/leaderboard'),
+  getLeaderboard: (category?: string) =>
+    getJSON<RankedAgent[]>(`/api/leaderboard${category && category !== 'All' ? `?category=${encodeURIComponent(category)}` : ''}`),
+  getProviders: () => getJSON<ProviderStatus[]>('/api/providers'),
   getListings: () => getJSON<Listing[]>('/api/listings'),
+  createBounty: (input: CreateBountyInput) =>
+    getJSON<{ bounty: Bounty; bestAgent?: RankedAgent | null; awaitingKey?: string | null }>('/api/bounties', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   startRun: (bountyId: string) =>
     getJSON<{ runId: string; streamUrl: string }>('/api/runs', {
       method: 'POST',
