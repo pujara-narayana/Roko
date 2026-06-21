@@ -1,16 +1,21 @@
 /**
  * Verification Oracle.
  *
- * Deterministic checks:
+ * Deterministic checks (always run):
  *   1. Count / completeness check
  *   2. Required-field schema check
  *   3. De-duplication check
  *   4. Criteria predicate match (sector, geo, revenue)
  *   5. Email format validity (RFC-5322 regex)
  *
- * Semantic / LLM-judge:
- *   - Stubbed deterministically for the seeded path.
- *   - If ANTHROPIC_API_KEY present, could call Claude for fuzzy checks.
+ * LLM sub-score judge (BINDING):
+ *   - When ANTHROPIC_API_KEY is configured, Claude judges `completeness` and
+ *     `validity`, and these REPLACE the deterministic values for gating — they
+ *     can move the verdict in either direction.
+ *   - `criteriaMatch` and the `duplicates` gate stay deterministic (objective
+ *     predicate count / exact duplicate count).
+ *   - On no key / error / timeout / junk reply, the deterministic completeness
+ *     and validity stand. No exception propagates to callers.
  *
  * PASS gate: completeness >= 95 AND criteriaMatch >= 90
  *            AND validity >= 90 AND overall >= 90 AND duplicates == 0
@@ -22,6 +27,7 @@ import type {
 } from '../types';
 import { persistOracleResults } from '../persist';
 import { judgeDeliverable } from './judge';
+import { judgeScores } from './llm-score';
 import { HERO_REQUIREMENTS } from '../seed/fixtures';
 import { arize } from '../providers';
 
@@ -76,21 +82,74 @@ function findDuplicates(records: CompanyRecord[]): CompanyRecord[][] {
   return [...byName.values()].filter(group => group.length > 1);
 }
 
-// ─── Semantic score ───────────────────────────────────────────────────────────
-// Derived from the deterministic checks themselves (criteria match + validity)
-// rather than agent identity, so it tracks actual corpus quality. In production
-// this is where a low-temperature Claude judge for fuzzy criteria would slot in.
+// ─── Binding LLM sub-score judge (data-research path) ─────────────────────────
+// Builds a compact context from the requirements + submitted corpus and asks
+// Claude (temperature 0, cached) to score completeness and validity. These are
+// BINDING — the caller feeds them into the gates. Returns null on any failure
+// (no key / timeout / error / junk) so the caller falls back to deterministic.
 
-function semanticScore(criteriaMatchPct: number, validityPct: number): number {
-  return Math.round(Math.min(100, criteriaMatchPct * 0.6 + validityPct * 0.4));
+interface DataAudit {
+  criteriaMatched: number;
+  criteriaFailSamples: string[];
+  dupCount: number;
+  dupNames: string[];
+  invalidEmailCount: number;
+  invalidEmailSamples: string[];
+}
+
+async function judgeDataScores(
+  records: CompanyRecord[],
+  requirements: AcceptanceRequirements,
+  audit: DataAudit,
+) {
+  const criteriaText = requirements.criteria
+    .filter(c => c.semantic)
+    .map((c, i) => `${i + 1}. ${c.semantic}`)
+    .join('\n') || '(none stated)';
+
+  const sample = records.slice(0, 20)
+    .map(r => `  - ${r.name} — ${r.geo} ${r.sector}, revenue $${(Number(r.revenue) / 1_000_000).toFixed(1)}M, VP-Eng email: ${r.vpEngEmail}`)
+    .join('\n');
+
+  // Deterministic audit handed to Claude as ground truth so its BINDING scores
+  // track real defects rather than guessing from a sample.
+  const auditText =
+    `Automated audit (ground truth — base your scores on these counts):\n` +
+    `- records delivered: ${records.length} of ${requirements.targetCount}\n` +
+    `- records meeting all hard criteria (sector/geo/revenue): ${audit.criteriaMatched} of ${requirements.targetCount}` +
+    (audit.criteriaFailSamples.length ? ` — e.g. ${audit.criteriaFailSamples.slice(0, 3).join('; ')}` : '') + `\n` +
+    `- duplicate records: ${audit.dupCount}` +
+    (audit.dupNames.length ? ` (${audit.dupNames.slice(0, 3).join(', ')})` : '') + `\n` +
+    `- emails failing format/domain validation: ${audit.invalidEmailCount}` +
+    (audit.invalidEmailSamples.length ? ` — e.g. ${audit.invalidEmailSamples.slice(0, 3).join('; ')}` : '');
+
+  const context =
+    `Bounty acceptance requirements:\n` +
+    `- target count: ${requirements.targetCount}\n` +
+    `- sector: ${requirements.sector}\n` +
+    `- geography: ${requirements.geo}\n` +
+    `- minimum revenue: $${(requirements.minRevenue / 1_000_000).toFixed(0)}M\n` +
+    `- required fields per record: ${requirements.requiredFields.join(', ')}\n` +
+    `- fuzzy criteria:\n${criteriaText}\n\n` +
+    `${auditText}\n\n` +
+    `Submission sample (up to 20):\n${sample}\n\n` +
+    `Scoring rules — follow exactly, anchored to the audit counts above:\n` +
+    `- validity: if 0 emails failed validation, score validity 96–100. Otherwise validity ≈ 100 − round(100 × invalidEmails / recordsDelivered). ` +
+    `NEVER withhold validity points for being unable to confirm the records exist in the real world — well-formed, audit-clean data is valid.\n` +
+    `- completeness: 100 when the full target count is delivered with all required fields and 0 duplicates; subtract for short counts, missing fields, and ~5 points per duplicate.\n` +
+    `- criteriaMatch: ≈ round(100 × criteriaMatches / targetCount).`;
+
+  // Cache key binds the exact content scored, so the cache is sound.
+  const cacheKey = JSON.stringify({ records, requirements });
+  return judgeScores(cacheKey, context);
 }
 
 // ─── Score one submission ─────────────────────────────────────────────────────
 
-export function scoreSubmission(
+export async function scoreSubmission(
   submission: Submission,
   requirements: AcceptanceRequirements,
-): OracleResult {
+): Promise<OracleResult> {
   const { submissionId, agentId, records } = submission;
   const reasons: OracleReason[] = [];
   const gateResults: GateResult[] = [];
@@ -197,41 +256,75 @@ export function scoreSubmission(
     failingRows: invalidEmails.slice(0, 5),
   });
 
-  // ── 6. Semantic/LLM judge (derived from deterministic checks) ─────────────
-  const semanticPct = semanticScore(criteriaMatchPct, validityPct);
-  reasons.push({
-    kind: 'criteria',
-    ok: semanticPct >= 90,
-    detail: `Semantic quality score: ${semanticPct}/100 (verified current employment, public presence)`,
-    criterionId: 'semantic',
-  });
+  // ── 6. Binding LLM sub-scores (completeness + validity) ──────────────────
+  // criteriaMatch stays deterministic (objective sector/geo/revenue predicate
+  // count); the duplicates gate stays deterministic (exact count). completeness
+  // and validity are judged by Claude when configured and REPLACE the
+  // deterministic values for gating — they can move the verdict.
+  const criteriaMatch = Math.round(criteriaMatchPct);
+  const completenessDet = completeness;        // count − duplicate penalty
+  const validityDet = Math.round(validityPct); // email-format pass rate
 
-  // ── Compute sub-scores ────────────────────────────────────────────────────
-
-  // criteriaMatch: weighted average of predicate match + semantic
-  const criteriaMatch = Math.min(100, Math.round(criteriaMatchPct * 0.7 + semanticPct * 0.3));
-
-  // validity: email check drives this
-  const validity = Math.round(validityPct);
-
-  // ── Gate checks ───────────────────────────────────────────────────────────
   const COMPLETENESS_GATE = 95;
   const CRITERIA_GATE = 90;
   const VALIDITY_GATE = 90;
   const OVERALL_GATE = 90;
 
+  let completenessScore = completenessDet;
+  let validityScore = validityDet;
+
+  const llm = await judgeDataScores(records, requirements, {
+    criteriaMatched,
+    criteriaFailSamples: criteriaFails,
+    dupCount,
+    dupNames: dupGroups.map(g => g[0].name),
+    invalidEmailCount: invalidEmails.length,
+    invalidEmailSamples: invalidEmails,
+  }).catch(() => null);
+  if (llm) {
+    // Binding: Claude's completeness + validity drive the gates.
+    completenessScore = llm.completeness;
+    validityScore = llm.validity;
+    reasons.push(
+      {
+        kind: 'completeness',
+        ok: completenessScore >= COMPLETENESS_GATE,
+        detail: `Claude judged completeness ${completenessScore}/100 — ${llm.completenessReason || 'assessed the delivered set against the required count and fields'}`,
+        criterionId: 'llm-completeness',
+      },
+      {
+        kind: 'validity',
+        ok: validityScore >= VALIDITY_GATE,
+        detail: `Claude judged validity ${validityScore}/100 — ${llm.validityReason || 'assessed how trustworthy and well-formed the records are'}`,
+        criterionId: 'llm-validity',
+      },
+    );
+    if (llm.criteriaReason) {
+      reasons.push({ kind: 'criteria', ok: criteriaOk, detail: llm.criteriaReason, criterionId: 'semantic' });
+    }
+  } else {
+    // No key / timeout / error → deterministic completeness & validity stand.
+    reasons.push({
+      kind: 'completeness',
+      ok: completenessScore >= COMPLETENESS_GATE,
+      detail: `Completeness ${Math.round(completenessScore)}/100 from deterministic count (LLM judge unavailable).`,
+      criterionId: 'det-completeness',
+    });
+  }
+
+  // ── Gate checks ───────────────────────────────────────────────────────────
   gateResults.push(
-    { gate: 'completeness',  passed: completeness  >= COMPLETENESS_GATE, value: Math.round(completeness),  threshold: COMPLETENESS_GATE },
-    { gate: 'criteriaMatch', passed: criteriaMatch >= CRITERIA_GATE,     value: criteriaMatch,              threshold: CRITERIA_GATE },
-    { gate: 'validity',      passed: validity      >= VALIDITY_GATE,     value: validity,                   threshold: VALIDITY_GATE },
-    { gate: 'duplicates',    passed: dupCount === 0,                     value: dupCount,                   threshold: 0 },
+    { gate: 'completeness',  passed: completenessScore >= COMPLETENESS_GATE, value: Math.round(completenessScore), threshold: COMPLETENESS_GATE },
+    { gate: 'criteriaMatch', passed: criteriaMatch     >= CRITERIA_GATE,     value: criteriaMatch,                 threshold: CRITERIA_GATE },
+    { gate: 'validity',      passed: validityScore     >= VALIDITY_GATE,     value: Math.round(validityScore),     threshold: VALIDITY_GATE },
+    { gate: 'duplicates',    passed: dupCount === 0,                         value: dupCount,                      threshold: 0 },
   );
 
   // overall = weighted average of sub-scores
   const overallScore = Math.round(
-    criteriaMatch  * 0.35 +
-    completeness   * 0.35 +
-    validity       * 0.30
+    criteriaMatch     * 0.35 +
+    completenessScore * 0.35 +
+    validityScore     * 0.30
   );
 
   gateResults.push({
@@ -243,11 +336,11 @@ export function scoreSubmission(
 
   // PASS gate: ALL gates must pass
   const allGatesPassed =
-    completeness  >= COMPLETENESS_GATE &&
-    criteriaMatch >= CRITERIA_GATE &&
-    validity      >= VALIDITY_GATE &&
-    overallScore  >= OVERALL_GATE &&
-    dupCount      === 0;
+    completenessScore >= COMPLETENESS_GATE &&
+    criteriaMatch     >= CRITERIA_GATE &&
+    validityScore     >= VALIDITY_GATE &&
+    overallScore      >= OVERALL_GATE &&
+    dupCount          === 0;
 
   const verdict: 'pass' | 'fail' = allGatesPassed ? 'pass' : 'fail';
 
@@ -262,8 +355,8 @@ export function scoreSubmission(
     agentId,
     subScores: {
       criteriaMatch: Math.round(criteriaMatch),
-      completeness: Math.round(completeness),
-      validity: Math.round(validity),
+      completeness: Math.round(completenessScore),
+      validity: Math.round(validityScore),
     },
     overallScore,
     verdict,
@@ -300,7 +393,7 @@ export async function runOracle(
     submissions.map((s) =>
       taskType !== 'data-research' || s.deliverable
         ? judgeDeliverable(s, bounty)
-        : Promise.resolve(scoreSubmission(s, requirements)),
+        : scoreSubmission(s, requirements),
     ),
   );
 
