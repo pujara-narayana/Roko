@@ -24,11 +24,20 @@ export interface CompleteOpts {
   timeoutMs?: number;
 }
 
+/** A base64-encoded image to attach to a vision request. */
+export interface ImageInput {
+  base64: string;
+  mediaType: string; // 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+}
+
+type MessageContent = string | Array<Record<string, unknown>>;
+
 /**
- * Single-turn completion. Returns the assistant's text, or null on any failure
- * (not configured, network error, timeout, bad status). Never throws.
+ * Low-level Messages API call. Accepts either a plain prompt string or an array
+ * of content blocks (for multimodal/vision). Returns the assistant's text, or
+ * null on any failure. Never throws.
  */
-export async function complete(prompt: string, opts: CompleteOpts = {}): Promise<string | null> {
+async function callMessages(content: MessageContent, opts: CompleteOpts = {}): Promise<string | null> {
   if (!isConfigured()) return null;
 
   const controller = new AbortController();
@@ -48,7 +57,7 @@ export async function complete(prompt: string, opts: CompleteOpts = {}): Promise
         max_tokens: opts.maxTokens ?? 1024,
         temperature: opts.temperature ?? 0.4,
         ...(opts.system ? { system: opts.system } : {}),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content }],
       }),
     });
 
@@ -66,7 +75,7 @@ export async function complete(prompt: string, opts: CompleteOpts = {}): Promise
 
     return text || null;
   } catch (err) {
-    console.error('[anthropic] complete failed:', err instanceof Error ? err.message : err);
+    console.error('[anthropic] request failed:', err instanceof Error ? err.message : err);
     return null;
   } finally {
     clearTimeout(timeout);
@@ -74,15 +83,64 @@ export async function complete(prompt: string, opts: CompleteOpts = {}): Promise
 }
 
 /**
+ * Single-turn text completion. Returns the assistant's text, or null on any
+ * failure (not configured, network error, timeout, bad status). Never throws.
+ */
+export async function complete(prompt: string, opts: CompleteOpts = {}): Promise<string | null> {
+  return callMessages(prompt, opts);
+}
+
+/**
+ * Single-turn completion with one or more images attached (vision). The images
+ * are sent before the prompt text. Returns the assistant's text, or null on any
+ * failure. Never throws.
+ */
+export async function completeWithImages(
+  prompt: string,
+  images: ImageInput[],
+  opts: CompleteOpts = {},
+): Promise<string | null> {
+  const content: Array<Record<string, unknown>> = [
+    ...images.map((img) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+    })),
+    { type: 'text', text: prompt },
+  ];
+  return callMessages(content, opts);
+}
+
+/**
  * Ask Claude to return strict JSON. Parses the first JSON object/array found.
  * Returns null on any failure so callers fall back to deterministic logic.
  */
 export async function completeJSON<T = unknown>(prompt: string, opts: CompleteOpts = {}): Promise<T | null> {
-  const text = await complete(prompt, {
+  const text = await complete(prompt, withJsonSystem(opts));
+  return parseJson<T>(text);
+}
+
+/**
+ * Like completeJSON, but attaches images so Claude can SEE them while producing
+ * the JSON (vision). Returns null on any failure so callers fall back.
+ */
+export async function completeJSONWithImages<T = unknown>(
+  prompt: string,
+  images: ImageInput[],
+  opts: CompleteOpts = {},
+): Promise<T | null> {
+  const text = await completeWithImages(prompt, images, withJsonSystem(opts));
+  return parseJson<T>(text);
+}
+
+function withJsonSystem(opts: CompleteOpts): CompleteOpts {
+  return {
     ...opts,
     system: (opts.system ? opts.system + '\n\n' : '') +
       'Respond with ONLY valid JSON. No prose, no markdown fences.',
-  });
+  };
+}
+
+function parseJson<T>(text: string | null): T | null {
   if (!text) return null;
   try {
     const match = text.match(/[[{][\s\S]*[\]}]/);

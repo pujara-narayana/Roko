@@ -15,6 +15,7 @@
 
 import { createHash } from 'crypto';
 import { anthropic } from '../providers';
+import type { ImageInput } from '../providers/anthropic';
 
 export interface LlmScore {
   criteriaMatch: number;       // 0–100
@@ -81,6 +82,64 @@ export async function judgeScores(cacheKey: string, context: string): Promise<Ll
 
   if (!raw || typeof raw !== 'object') return null;
   // Require at least one numeric axis to be present — guards against parse junk.
+  if (raw.criteriaMatch == null && raw.completeness == null && raw.validity == null) return null;
+
+  const score: LlmScore = {
+    criteriaMatch: clampScore(raw.criteriaMatch),
+    completeness: clampScore(raw.completeness),
+    validity: clampScore(raw.validity),
+    criteriaReason: oneSentence(raw.criteriaReason),
+    completenessReason: oneSentence(raw.completenessReason),
+    validityReason: oneSentence(raw.validityReason),
+  };
+  _cache.set(hash, score);
+  return score;
+}
+
+// ─── Vision judge (image deliverables) ────────────────────────────────────────
+
+const VISION_SYSTEM =
+  'You are a strict, fair verification oracle for an AI-agent outcome marketplace. ' +
+  'You are shown an IMAGE that a competing agent generated to fulfill a bounty, plus the ' +
+  'bounty acceptance criteria. Judge the IMAGE ITSELF (what you actually see), not any text ' +
+  'description of it. Score on three integer axes 0–100:\n' +
+  '- criteriaMatch: does the image depict what the brief asked for — subject, style, ' +
+  'composition, and any stated constraints?\n' +
+  '- completeness: are all requested elements actually present in the image?\n' +
+  '- validity: is it a coherent, well-formed image, free of obvious generation defects ' +
+  '(garbled text, malformed anatomy, artifacts, a blank/broken render)?\n' +
+  'Reserve >= 90 for images that genuinely satisfy the brief; score real shortfalls honestly. ' +
+  'Respond with ONLY this JSON object: ' +
+  '{"criteriaMatch":<int>,"completeness":<int>,"validity":<int>,' +
+  '"criteriaReason":"<one concrete sentence>","completenessReason":"<one concrete sentence>","validityReason":"<one concrete sentence>"}. ' +
+  'Each reason must be one concrete sentence of at most 24 words, describing what you SEE.';
+
+/**
+ * Judge an image deliverable by actually showing the rendered image to Claude.
+ * Same binding contract and cache discipline as judgeScores. Returns null on any
+ * failure (no key / timeout / error / junk) so the caller falls back.
+ */
+export async function judgeImageScores(
+  cacheKey: string,
+  context: string,
+  image: ImageInput,
+): Promise<LlmScore | null> {
+  if (!anthropic.isConfigured()) return null;
+
+  const hash = createHash('sha256').update('vision:' + cacheKey).digest('hex');
+  const hit = _cache.get(hash);
+  if (hit) return hit;
+
+  const raw = await anthropic
+    .completeJSONWithImages<Partial<Record<keyof LlmScore, unknown>>>(context, [image], {
+      system: VISION_SYSTEM,
+      maxTokens: 400,
+      temperature: 0,
+      timeoutMs: 22_000,
+    })
+    .catch(() => null);
+
+  if (!raw || typeof raw !== 'object') return null;
   if (raw.criteriaMatch == null && raw.completeness == null && raw.validity == null) return null;
 
   const score: LlmScore = {
