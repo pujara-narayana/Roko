@@ -1,14 +1,16 @@
 /**
  * Generic deliverable judge — for code / presentation / image / video bounties.
  *
- * Verdict + sub-scores are deterministic (driven by the competition role) so the
- * demo is reliable across rehearsals; the human-readable reasoning is enriched by
- * a real Claude call when available, falling back to a clear template otherwise.
- * Same OracleResult shape as the data-research oracle, so the UI is unchanged.
+ * When ANTHROPIC_API_KEY is configured, Claude judges criteriaMatch,
+ * completeness, and validity against the bounty's acceptance text — these are
+ * BINDING: they drive the verdict. With no key (or on error / timeout / junk),
+ * the judge falls back to deterministic role-based scores (specialist vs
+ * challenger) so the demo stays reliable. Same OracleResult shape as the
+ * data-research oracle, so the UI is unchanged.
  */
 
 import type { Submission, Bounty, OracleResult, GateResult, OracleReason } from '../types';
-import { anthropic } from '../providers';
+import { judgeScores } from './llm-score';
 
 const GATE = 90;
 
@@ -43,46 +45,53 @@ export async function judgeDeliverable(submission: Submission, bounty: Bounty): 
   const role = (deliverable?.meta?.role as string) ?? 'challenger';
   const isSpecialist = role === 'specialist';
 
-  const subScores = isSpecialist
-    ? { criteriaMatch: 94, completeness: 95, validity: 93 }
-    : { criteriaMatch: 58, completeness: 52, validity: 64 };
+  // ── Binding LLM scores when configured; role-based fallback otherwise ──────
+  const context =
+    `Bounty acceptance criteria: "${acceptance}".\n\n` +
+    `Deliverable submitted (${deliverable?.kind ?? 'unknown'}):\n` +
+    `- title: ${deliverable?.title ?? '(untitled)'}\n` +
+    `- summary: ${deliverable?.summary ?? '(none)'}\n` +
+    (deliverable?.body ? `- content:\n${truncate(deliverable.body, 1500)}\n` : '') +
+    (deliverable?.durationSec ? `- duration: ${deliverable.durationSec}s\n` : '') +
+    `\nJudge how well this deliverable meets the acceptance criteria.`;
+  const cacheKey = JSON.stringify({ submissionId, acceptance, summary: deliverable?.summary, body: deliverable?.body });
+  const llm = await judgeScores(cacheKey, context).catch(() => null);
+
+  const subScores = llm
+    ? { criteriaMatch: llm.criteriaMatch, completeness: llm.completeness, validity: llm.validity }
+    : isSpecialist
+      ? { criteriaMatch: 94, completeness: 95, validity: 93 }
+      : { criteriaMatch: 58, completeness: 52, validity: 64 };
+
   const overallScore = Math.round(subScores.criteriaMatch * 0.35 + subScores.completeness * 0.35 + subScores.validity * 0.3);
   const gateResults = gatesFor(subScores, overallScore);
   const verdict: 'pass' | 'fail' = gateResults.every((g) => g.passed) ? 'pass' : 'fail';
 
-  // Deterministic reasons (always present), optionally enriched by Claude.
-  const reasons: OracleReason[] = isSpecialist
+  // Reasons: prefer Claude's concrete sentences; otherwise a clear role template.
+  const reasons: OracleReason[] = llm
     ? [
-        { kind: 'criteria', ok: true, detail: `Deliverable satisfies the acceptance criteria: "${truncate(acceptance, 120)}"` },
-        { kind: 'completeness', ok: true, detail: `Complete — ${deliverable?.summary ?? 'all required parts present'}` },
-        { kind: 'validity', ok: true, detail: 'Output is well-formed and usable as delivered.' },
+        { kind: 'criteria', ok: subScores.criteriaMatch >= GATE, detail: llm.criteriaReason || `Criteria match scored ${subScores.criteriaMatch}/100.` },
+        { kind: 'completeness', ok: subScores.completeness >= GATE, detail: llm.completenessReason || `Completeness scored ${subScores.completeness}/100.` },
+        { kind: 'validity', ok: subScores.validity >= GATE, detail: llm.validityReason || `Validity scored ${subScores.validity}/100.` },
       ]
-    : [
-        { kind: 'criteria', ok: false, detail: `Does not fully meet the acceptance criteria: "${truncate(acceptance, 120)}"` },
-        { kind: 'completeness', ok: false, detail: `Incomplete — ${deliverable?.summary ?? 'missing required parts'}` },
-        { kind: 'validity', ok: true, detail: 'Output is well-formed but insufficient.' },
-      ];
+    : isSpecialist
+      ? [
+          { kind: 'criteria', ok: true, detail: `Deliverable satisfies the acceptance criteria: "${truncate(acceptance, 120)}"` },
+          { kind: 'completeness', ok: true, detail: `Complete — ${deliverable?.summary ?? 'all required parts present'}` },
+          { kind: 'validity', ok: true, detail: 'Output is well-formed and usable as delivered.' },
+        ]
+      : [
+          { kind: 'criteria', ok: false, detail: `Does not fully meet the acceptance criteria: "${truncate(acceptance, 120)}"` },
+          { kind: 'completeness', ok: false, detail: `Incomplete — ${deliverable?.summary ?? 'missing required parts'}` },
+          { kind: 'validity', ok: true, detail: 'Output is well-formed but insufficient.' },
+        ];
 
-  // Best-effort Claude enrichment of the headline reason (verdict stays fixed).
-  const enriched = await enrich(deliverable?.summary ?? '', acceptance, verdict).catch(() => null);
-
-  const summary = enriched
-    ?? (verdict === 'pass'
-      ? `Deliverable meets the brief — ${deliverable?.summary ?? 'accepted'}.`
-      : `Deliverable falls short — ${deliverable?.summary ?? 'rejected'}.`);
+  const headline = llm?.criteriaReason || deliverable?.summary || (verdict === 'pass' ? 'accepted' : 'rejected');
+  const summary = verdict === 'pass'
+    ? `Deliverable meets the brief — ${headline}.`
+    : `Deliverable falls short — ${headline}.`;
 
   return { submissionId, agentId, subScores, overallScore, verdict, summary, gateResults, reasons, duplicates: 0, scoredAt };
-}
-
-async function enrich(summary: string, acceptance: string, verdict: 'pass' | 'fail'): Promise<string | null> {
-  const text = await anthropic.complete(
-    `A bounty's acceptance criteria: "${acceptance}".\nAn agent submitted: "${summary}".\nThe verdict is ${verdict.toUpperCase()}. In ONE sentence (max 22 words), explain why, concretely.`,
-    { maxTokens: 80, temperature: 0.2, timeoutMs: 12_000 },
-  );
-  const cleaned = text ? text.replace(/\s+/g, ' ').trim() : '';
-  // Guard against degenerate replies (a stray char / fragment) overriding the
-  // clear deterministic summary.
-  return cleaned.length > 10 ? cleaned : null;
 }
 
 function truncate(s: string, n: number): string {

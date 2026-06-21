@@ -16,7 +16,7 @@
 // ─────────────────────────────────────────────
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import type { RunEvent, OracleReason, GateResult, OracleSubScores } from '@/lib/types';
+import type { RunEvent, OracleReason, GateResult, OracleSubScores, CompanyRecord, GenericDeliverable } from '@/lib/types';
 
 export type StageKey = 'intake' | 'compete' | 'verify' | 'settle';
 export type StageState = 'pending' | 'active' | 'complete';
@@ -32,6 +32,8 @@ export interface AgentCardState {
   source?: string;
   deliverableTitle?: string;   // non-data tasks
   awaitingKey?: string;        // provider id when blocked on a missing key
+  records?: CompanyRecord[];        // actual submitted data (data tasks)
+  deliverable?: GenericDeliverable; // actual submitted artifact (other tasks)
 }
 
 export interface VerdictState {
@@ -199,6 +201,8 @@ function reduceEvent(prev: PipelineState, event: RunEvent): PipelineState {
               recordCount: p.recordCount as number | undefined,
               source: p.source as string | undefined,
               deliverableTitle: (p.deliverableTitle as string) ?? card.deliverableTitle,
+              records: (p.records as CompanyRecord[] | undefined) ?? card.records,
+              deliverable: (p.deliverable as GenericDeliverable | undefined) ?? card.deliverable,
               progressStep: card.totalSteps,
             },
           },

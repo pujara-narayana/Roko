@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import type { AgentCardState, AgentStatus } from '@/lib/client/useRunStream';
 import { agentAccent, agentEmoji } from '@/lib/client/constants';
 import { cleanText } from '@/lib/client/format';
+import { AgentOutputModal } from './AgentOutputModal';
 
 const STATUS_META: Record<AgentStatus, { label: string; color: string; symbol: string }> = {
   queued: { label: 'Queued', color: 'var(--fg-muted)', symbol: '○' },
@@ -18,6 +20,8 @@ export function AgentCard({
   const [c1, c2] = agentAccent(agent.agentId);
   const meta = STATUS_META[agent.status];
   const working = agent.status === 'working';
+  const [outputOpen, setOutputOpen] = useState(false);
+  const hasOutput = (agent.records?.length ?? 0) > 0 || !!agent.deliverable;
 
   return (
     <div
@@ -95,6 +99,26 @@ export function AgentCard({
           🔑 Waiting for the {agent.awaitingKey} key
         </p>
       )}
+
+      {/* View the actual submitted output */}
+      {hasOutput && (
+        <button
+          onClick={() => setOutputOpen(true)}
+          className="mt-1 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+          style={{ background: 'var(--ink-700)', color: 'var(--paint-blue)', border: '1px solid var(--border)' }}
+        >
+          View output →
+        </button>
+      )}
+
+      <AgentOutputModal
+        open={outputOpen}
+        onClose={() => setOutputOpen(false)}
+        agentName={name}
+        source={agent.source}
+        records={agent.records}
+        deliverable={agent.deliverable}
+      />
     </div>
   );
 }

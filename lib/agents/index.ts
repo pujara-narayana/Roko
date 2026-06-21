@@ -19,13 +19,20 @@ import type {
 } from '../types';
 import store from '../store';
 import {
-  getPerfectCorpus, getDuplicatesCorpus, getBadEmailCorpus,
+  getPerfectCorpus, getDuplicatesCorpus, getBadEmailCorpus, HERO_REQUIREMENTS,
 } from '../seed/fixtures';
 import { specialtyForTaskType } from '../categories';
 import { anthropic, browserbase, midjourney, pika, isProviderConfigured } from '../providers';
 import { persistSubmission } from '../persist';
+import { deriveTargets, normalizeSignals, reachableCount } from '../live-corpus';
 
-const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_TIMEOUT_MS ?? '45000', 10);
+// The research specialist now does TWO bounded steps back-to-back — Claude target
+// derivation (~20s) then live Browserbase retrieval (~38s) — so the agent ceiling
+// must clear their sum (~58s) with margin. Challengers/Claude tasks finish well under.
+const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_TIMEOUT_MS ?? '90000', 10);
+// Minimum target sites the live browser must reach for a run to count as "live"
+// (below this we fall back to the seeded corpus rather than ship a thin result).
+const LIVE_MIN_REACHABLE = parseInt(process.env.LIVE_MIN_REACHABLE ?? '12', 10);
 
 type Role = 'specialist' | 'challenger-a' | 'challenger-b';
 type EmitLog = (agentId: string, line: string, step: number, total: number) => void;
@@ -72,23 +79,35 @@ interface FulfillResult {
   awaitingKey?: ProviderId;
 }
 
-async function fulfillResearch(role: Role, emit: (line: string, step: number) => void): Promise<FulfillResult> {
+async function fulfillResearch(role: Role, bounty: Bounty, emit: (line: string, step: number) => void): Promise<FulfillResult> {
   if (role === 'specialist') {
+    emit('Compiling target list from the bounty criteria…', 1);
+
+    const requirements = bounty.requirements ?? HERO_REQUIREMENTS;
+    // Bounty-driven: Claude proposes real orgs matching THIS bounty's criteria.
+    const targets = await deriveTargets(bounty);
+
     emit('Opening Browserbase session for live retrieval…', 1);
-    const session = await browserbase.createSession().catch(() => null);
-    if (session) {
-      emit(`Live session ${session.sessionId.slice(0, 8)} — enriching verified contacts…`, 2);
-      void browserbase.closeSession(session.sessionId);
-    } else {
-      emit('No live browser session — falling back to verified cache…', 2);
+    // Retrieve live every run (no cache) so results match this bounty's criteria.
+    const signals = await browserbase
+      .retrieveCompanies(targets, { perPageTimeoutMs: 7_000, concurrency: 3, overallTimeoutMs: 38_000 })
+      .catch(() => null);
+    const reached = signals ? reachableCount(signals) : 0;
+    const minReachable = Math.min(LIVE_MIN_REACHABLE, Math.max(1, Math.ceil(targets.length * 0.6)));
+
+    if (signals && reached >= minReachable) {
+      emit(`Live browser visited ${signals.length} sites — ${reached} verified…`, 2);
+      const records = normalizeSignals(signals, requirements, targets);
+      emit('Cross-referencing MX records — deduping…', 3);
+      emit(`Submitting ${records.length} verified results…`, 4);
+      return { records, source: 'browserbase', engine: 'browserbase' };
     }
+
+    // Live unavailable / too few reachable → seeded fallback (demo never hangs).
+    emit('No live browser session — falling back to verified cache…', 2);
     emit('Cross-referencing MX records — 0 duplicates…', 3);
     emit('Submitting 20 verified results…', 4);
-    return {
-      records: getPerfectCorpus(),
-      source: session ? 'browserbase' : 'seeded_cache',
-      engine: session ? 'browserbase' : 'cache',
-    };
+    return { records: getPerfectCorpus(), source: 'seeded_cache', engine: 'cache' };
   }
   if (role === 'challenger-a') {
     emit('Querying lead database…', 1);
@@ -279,7 +298,7 @@ async function runAgent(
       case 'presentation': return fulfillPresentation(role, bounty, emitLog);
       case 'image':        return fulfillMedia('image', bounty, emitLog);
       case 'video':        return fulfillMedia('video', bounty, emitLog);
-      default:             return fulfillResearch(role, emitLog);
+      default:             return fulfillResearch(role, bounty, emitLog);
     }
   };
 
@@ -319,6 +338,10 @@ async function runAgent(
           recordCount: submission.records.length,
           deliverableTitle: submission.deliverable?.title,
           awaitingKey: result.awaitingKey,
+          // Ship the actual output so the UI can let users inspect what each
+          // agent submitted (records for data tasks, deliverable otherwise).
+          records: submission.records,
+          deliverable: submission.deliverable,
         },
       });
       return submission;

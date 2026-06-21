@@ -25,3 +25,11 @@ Hard constraints: payments/crypto/KYC/auth all mocked or stubbed. One seeded sub
 - SSE RunEvent shape: { event: "stage"|"agent", data: { stage, agentId?, status: "started"|"completed"|"failed" } }.
 
 **PRD artifact:** docs/feature-factory/bounty-marketplace/02-prd.md
+
+**Oracle LLM-Judge addendum (Phase 2 enhancement):** docs/feature-factory/oracle-llm-judge/02-prd.md
+- Replaces `semanticScore` stub in `lib/oracle/index.ts` (lines 84-86) with real `anthropic.complete()` call.
+- Key architectural decision: `criteriaMatch` gate must be pure `Math.round(criteriaMatchPct)` — the old `criteriaMatchPct*0.7 + semanticPct*0.3` blend is removed. Judge output feeds only a non-gated `OracleReason` entry (`criterionId: 'semantic'`).
+- `scoreSubmission` becomes async; `runOracle` must await it.
+- Graceful degradation: `null` return from `anthropic.complete` triggers deterministic fallback — no exception propagates.
+- Verdict authority is deterministic-gate-only by construction, so three-run stability is structural, not a probabilistic bet.
+- Judge call params: `temperature <= 0.2`, `timeoutMs: 12_000`.

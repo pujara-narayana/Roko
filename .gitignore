@@ -34,3 +34,6 @@ yarn-error.log*
 .idea/
 
 .env
+
+# playwright-mcp test scratch
+.playwright-mcp/
