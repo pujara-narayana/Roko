@@ -12,6 +12,8 @@ import * as anthropic from './anthropic';
 import * as browserbase from './browserbase';
 import * as pika from './pika';
 import * as midjourney from './midjourney';
+import * as pollinations from './pollinations';
+import * as huggingface from './huggingface';
 import * as arize from './arize';
 
 const META: Record<ProviderId, { label: string; docsUrl?: string }> = {
@@ -19,6 +21,8 @@ const META: Record<ProviderId, { label: string; docsUrl?: string }> = {
   browserbase: { label: 'Browserbase', docsUrl: 'https://docs.browserbase.com' },
   pika: { label: 'Pika (video)', docsUrl: 'https://pika.art' },
   midjourney: { label: 'Midjourney (image)', docsUrl: 'https://midjourney.com' },
+  pollinations: { label: 'Pollinations (image)', docsUrl: 'https://pollinations.ai' },
+  huggingface: { label: 'Hugging Face (video)', docsUrl: 'https://huggingface.co/docs/inference-providers' },
   arize: { label: 'Arize (observability)', docsUrl: 'https://arize.com' },
 };
 
@@ -27,6 +31,8 @@ const CHECKERS: Record<ProviderId, () => boolean> = {
   browserbase: browserbase.isConfigured,
   pika: pika.isConfigured,
   midjourney: midjourney.isConfigured,
+  pollinations: pollinations.isConfigured,
+  huggingface: huggingface.isConfigured,
   arize: arize.isConfigured,
 };
 
@@ -48,4 +54,4 @@ export function firstMissingProvider(ids: ProviderId[]): ProviderId | null {
   return ids.find((id) => !isProviderConfigured(id)) ?? null;
 }
 
-export { anthropic, browserbase, pika, midjourney, arize };
+export { anthropic, browserbase, pika, midjourney, pollinations, huggingface, arize };

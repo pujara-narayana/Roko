@@ -22,7 +22,7 @@ import {
   getPerfectCorpus, getDuplicatesCorpus, getBadEmailCorpus, HERO_REQUIREMENTS,
 } from '../seed/fixtures';
 import { specialtyForTaskType } from '../categories';
-import { anthropic, browserbase, midjourney, pika, isProviderConfigured } from '../providers';
+import { anthropic, browserbase, pollinations, huggingface, isProviderConfigured } from '../providers';
 import { persistSubmission } from '../persist';
 import { deriveTargets, normalizeSignals, reachableCount } from '../live-corpus';
 
@@ -215,41 +215,77 @@ async function fulfillPresentation(role: Role, bounty: Bounty, emit: (line: stri
 }
 
 async function fulfillMedia(taskType: 'image' | 'video', bounty: Bounty, emit: (line: string, step: number) => void): Promise<FulfillResult> {
-  const provider: ProviderId = taskType === 'image' ? 'midjourney' : 'pika';
+  const provider: ProviderId = taskType === 'image' ? 'pollinations' : 'huggingface';
   emit('Art-directing the prompt with Claude…', 1);
 
   if (taskType === 'image') {
-    const res = await midjourney.generateImage(bounty.description);
-    if (res.awaitingKey) {
-      emit('Midjourney key not configured — awaiting key…', 2);
-      return mediaAwaiting('image', provider);
+    // Expand the brief into a vivid art-direction prompt; fall back to the raw
+    // description if Claude is unavailable.
+    const directed = await anthropic.complete(
+      `Turn this brief into a single vivid text-to-image prompt (one line, no preamble): ${bounty.description}`,
+      { maxTokens: 120, temperature: 0.7 },
+    );
+    const imgPrompt = (directed ?? bounty.description).trim();
+    const res = await pollinations.generateImage(imgPrompt);
+    if (!res.artifactUrl) {
+      emit('Pollinations render failed — no image produced.', 2);
+      return {
+        records: [],
+        deliverable: {
+          kind: 'image', title: 'Image render failed',
+          summary: 'Pollinations did not return an image for the brief.',
+          meta: { role: 'specialist', prompt: imgPrompt },
+        },
+        source: 'pollinations', engine: 'pollinations',
+      };
     }
-    emit('Rendering frames via Midjourney…', 3);
+    emit('Rendering frames via Pollinations…', 3);
     return {
       records: [],
       deliverable: {
         kind: 'image', title: 'Generated image set',
-        summary: 'Art-directed images rendered to the brief.',
-        artifactUrl: res.artifactUrl, previewUrl: res.previewUrl, meta: { role: 'specialist' },
+        summary: 'Art-directed image rendered to the brief.',
+        artifactUrl: res.artifactUrl, previewUrl: res.previewUrl,
+        meta: { role: 'specialist', prompt: imgPrompt },
       },
-      source: 'midjourney', engine: 'midjourney',
+      source: 'pollinations', engine: 'pollinations',
     };
   }
 
-  const res = await pika.generateVideo(bounty.description, { durationSec: 18 });
+  // Storyboard the brief into a vivid motion prompt; fall back to the raw
+  // description if Claude is unavailable.
+  const directed = await anthropic.complete(
+    `Turn this brief into a single vivid text-to-video prompt describing motion and scene (one line, no preamble): ${bounty.description}`,
+    { maxTokens: 120, temperature: 0.7 },
+  );
+  const vidPrompt = (directed ?? bounty.description).trim();
+  const res = await huggingface.generateVideo(vidPrompt);
   if (res.awaitingKey) {
-    emit('Pika key not configured — awaiting key…', 2);
+    emit('Hugging Face token not configured — awaiting key…', 2);
     return mediaAwaiting('video', provider);
   }
-  emit('Rendering clip via Pika…', 3);
+  if (!res.artifactUrl) {
+    emit('Hugging Face render failed — no clip produced.', 2);
+    return {
+      records: [],
+      deliverable: {
+        kind: 'video', title: 'Video render failed',
+        summary: 'Hugging Face did not return a clip for the brief.',
+        meta: { role: 'specialist', prompt: vidPrompt },
+      },
+      source: 'huggingface', engine: 'huggingface',
+    };
+  }
+  emit('Rendering clip via Hugging Face…', 3);
   return {
     records: [],
     deliverable: {
       kind: 'video', title: 'Generated clip',
       summary: 'Short cinematic clip rendered to the brief.',
-      artifactUrl: res.artifactUrl, previewUrl: res.previewUrl, durationSec: res.durationSec, meta: { role: 'specialist' },
+      artifactUrl: res.artifactUrl, previewUrl: res.previewUrl, durationSec: res.durationSec,
+      meta: { role: 'specialist', prompt: vidPrompt },
     },
-    source: 'pika', engine: 'pika',
+    source: 'huggingface', engine: 'huggingface',
   };
 }
 
@@ -261,7 +297,7 @@ function mediaAwaiting(kind: 'image' | 'video', provider: ProviderId): FulfillRe
       summary: `Generation is wired but the ${provider} API key isn't set yet.`,
       awaitingKey: provider, meta: { role: 'specialist' },
     },
-    source: kind === 'image' ? 'midjourney' : 'pika',
+    source: kind === 'image' ? 'pollinations' : 'huggingface',
     engine: provider,
     awaitingKey: provider,
   };
@@ -395,8 +431,8 @@ export async function runCompetition(
 
 /** True when the task needs a provider key that isn't set (image/video). */
 export function blockingProvider(taskType: TaskType): ProviderId | null {
-  if (taskType === 'image' && !isProviderConfigured('midjourney')) return 'midjourney';
-  if (taskType === 'video' && !isProviderConfigured('pika')) return 'pika';
+  if (taskType === 'image' && !isProviderConfigured('pollinations')) return 'pollinations';
+  if (taskType === 'video' && !isProviderConfigured('huggingface')) return 'huggingface';
   return null;
 }
 

@@ -16,7 +16,7 @@ import { agentEmoji, agentName, PROVIDER_LABELS } from '@/lib/client/constants';
 const STEPS = ['Details', 'Review', 'Fund'] as const;
 const TIME_UNITS = ['Minutes', 'Hours', 'Days'] as const;
 const SPECIALTY_PROVIDER: Record<string, string | null> = {
-  image: 'midjourney', video: 'pika', research: null, code: null, presentation: null,
+  image: 'pollinations', video: 'huggingface', research: null, code: null, presentation: null,
 };
 
 export default function PostBountyPage() {

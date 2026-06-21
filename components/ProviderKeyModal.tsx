@@ -57,7 +57,7 @@ export function ProviderKeyModal({
           This task needs <span style={{ color: 'var(--fg)' }}>{label}</span> to generate the deliverable, but its
           API key isn&apos;t configured yet. The integration is fully wired — drop{' '}
           <code className="font-mono" style={{ color: 'var(--paint-cyan)' }}>
-            {provider === 'pika' ? 'PIKA_API_KEY' : provider === 'midjourney' ? 'MIDJOURNEY_API_KEY' : `${provider.toUpperCase()}_API_KEY`}
+            {provider === 'pika' ? 'PIKA_API_KEY' : provider === 'midjourney' ? 'MIDJOURNEY_API_KEY' : provider === 'huggingface' ? 'HF_API_KEY' : `${provider.toUpperCase()}_API_KEY`}
           </code>{' '}
           into <code className="font-mono" style={{ color: 'var(--paint-cyan)' }}>.env</code> and this agent goes live with no other change.
         </p>
