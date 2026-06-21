@@ -124,9 +124,20 @@ function DeliverableView({ deliverable }: { deliverable: GenericDeliverable }) {
         </p>
       )}
 
-      {(kind === 'image' || kind === 'video') && media && (
+      {kind === 'image' && media && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={media} alt={title} className="w-full rounded-xl" style={{ border: '1px solid var(--border)' }} />
+      )}
+
+      {kind === 'video' && media && (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video
+          src={media}
+          controls
+          playsInline
+          className="w-full rounded-xl"
+          style={{ border: '1px solid var(--border)' }}
+        />
       )}
 
       {body && (

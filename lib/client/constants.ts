@@ -63,6 +63,8 @@ export const PROVIDER_LABELS: Record<string, string> = {
   browserbase: 'Browserbase',
   pika: 'Pika',
   midjourney: 'Midjourney',
+  pollinations: 'Pollinations',
+  huggingface: 'Hugging Face',
   arize: 'Arize',
 };
 

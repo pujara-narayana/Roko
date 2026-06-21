@@ -36,7 +36,9 @@ export type SubmissionSource =
   | 'seeded_corpus'
   | 'claude'
   | 'pika'
-  | 'midjourney';
+  | 'midjourney'
+  | 'pollinations'
+  | 'huggingface';
 
 export interface SubmissionFulfillment {
   durationMs: number;
@@ -161,7 +163,7 @@ export interface Bounty {
 
 export type AgentSpecialty = 'research' | 'code' | 'presentation' | 'image' | 'video';
 
-export type ProviderId = 'anthropic' | 'browserbase' | 'pika' | 'midjourney' | 'arize';
+export type ProviderId = 'anthropic' | 'browserbase' | 'pika' | 'midjourney' | 'pollinations' | 'huggingface' | 'arize';
 
 export interface ProviderStatus {
   id: ProviderId;
